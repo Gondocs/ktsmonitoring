@@ -14,6 +14,24 @@ class SwaggerController extends Controller
                 'title' => config('app.name', 'KTS Monitoring API'),
                 'version' => '1.0.0',
             ],
+            'tags' => [
+                [
+                    'name' => 'Auth',
+                    'description' => 'Authentication endpoints (login, current user)',
+                ],
+                [
+                    'name' => 'Monitors',
+                    'description' => 'Legacy monitor endpoints',
+                ],
+                [
+                    'name' => 'Sites',
+                    'description' => 'Primary site monitoring endpoints',
+                ],
+                [
+                    'name' => 'Settings',
+                    'description' => 'Application settings (e.g. check interval)',
+                ],
+            ],
             'servers' => [
                 ['url' => url('/api')],
             ],
@@ -31,6 +49,7 @@ class SwaggerController extends Controller
             'paths' => [
                 '/login' => [
                     'post' => [
+                        'tags' => ['Auth'],
                         'summary' => 'Login with email and password',
                         'requestBody' => [
                             'required' => true,
@@ -65,6 +84,7 @@ class SwaggerController extends Controller
                 ],
                 '/me' => [
                     'get' => [
+                        'tags' => ['Auth'],
                         'summary' => 'Get the currently authenticated user',
                         'responses' => [
                             '200' => [
@@ -78,6 +98,7 @@ class SwaggerController extends Controller
                 ],
                 '/monitors' => [
                     'get' => [
+                        'tags' => ['Monitors'],
                         'summary' => 'List monitors',
                         'responses' => [
                             '200' => [
@@ -91,6 +112,7 @@ class SwaggerController extends Controller
                 ],
                 '/monitors/check' => [
                     'post' => [
+                        'tags' => ['Monitors'],
                         'summary' => 'Trigger manual monitor check',
                         'responses' => [
                             '200' => [
@@ -106,6 +128,7 @@ class SwaggerController extends Controller
                 // New /sites API
                 '/sites' => [
                     'get' => [
+                        'tags' => ['Sites'],
                         'summary' => 'List all sites',
                         'responses' => [
                             '200' => [
@@ -117,6 +140,7 @@ class SwaggerController extends Controller
                         ],
                     ],
                     'post' => [
+                        'tags' => ['Sites'],
                         'summary' => 'Add a new site',
                         'requestBody' => [
                             'required' => true,
@@ -150,6 +174,7 @@ class SwaggerController extends Controller
                 ],
                 '/sites/{id}' => [
                     'delete' => [
+                        'tags' => ['Sites'],
                         'summary' => 'Delete a site',
                         'parameters' => [
                             [
@@ -176,6 +201,7 @@ class SwaggerController extends Controller
                 ],
                 '/sites/check-all' => [
                     'post' => [
+                        'tags' => ['Sites'],
                         'summary' => 'Check all sites now',
                         'responses' => [
                             '200' => [
@@ -189,6 +215,7 @@ class SwaggerController extends Controller
                 ],
                 '/sites/{id}/check' => [
                     'post' => [
+                        'tags' => ['Sites'],
                         'summary' => 'Check a single site now',
                         'parameters' => [
                             [
@@ -209,6 +236,56 @@ class SwaggerController extends Controller
                             ],
                             '404' => [
                                 'description' => 'Not found',
+                            ],
+                        ],
+                    ],
+                ],
+
+                // Settings: monitor interval
+                '/settings/monitor-interval' => [
+                    'get' => [
+                        'tags' => ['Settings'],
+                        'summary' => 'Get current monitor check interval (minutes)',
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Current interval returned',
+                            ],
+                            '401' => [
+                                'description' => 'Unauthorized',
+                            ],
+                        ],
+                    ],
+                    'post' => [
+                        'tags' => ['Settings'],
+                        'summary' => 'Set monitor check interval (minutes)',
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['interval_minutes'],
+                                        'properties' => [
+                                            'interval_minutes' => [
+                                                'type' => 'integer',
+                                                'minimum' => 1,
+                                                'maximum' => 10080,
+                                                'description' => 'Interval in minutes (1-10080)',
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Interval updated',
+                            ],
+                            '400' => [
+                                'description' => 'Validation error',
+                            ],
+                            '401' => [
+                                'description' => 'Unauthorized',
                             ],
                         ],
                     ],

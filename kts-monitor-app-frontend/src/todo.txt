@@ -1,21 +1,9 @@
-- Beállítások, hogy mennyi időnként ellenőrizze a szolgáltatásokat
-
-- Routing
-
 - CSS javítások
-
 - Mobil és tablet nézet
-
+- Színek megváltoztatása
+- Szövegek középre igazítása
 - Jelenlegi URL és nevek szerkesztése
 
-- Színek megváltoztatása
-
-- Szövegek középre igazítása
-
 - Felhasználó létrehozása
-
+- Routing
 - Tesztek írása
-
-- A weboldalak url hozzáadása elég legyen csak a domain név pl: kts.hu
-
-- Stabilítás ellenőrzése, hogy megfelelő-e a számítás

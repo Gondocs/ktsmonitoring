@@ -85,3 +85,13 @@ export async function fetchSiteLogs(id: number, limit = 50) {
 	return apiFetch(`/sites/${id}/logs?limit=${limit}`);
 }
 
+export async function getMonitorInterval() {
+	return apiFetch('/settings/monitor-interval');
+}
+
+export async function setMonitorInterval(minutes: number) {
+	return apiFetch('/settings/monitor-interval', {
+		method: 'POST',
+		body: JSON.stringify({ interval_minutes: minutes }),
+	});
+}

@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\MonitorController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\MonitorLogController;
+use App\Http\Controllers\Api\SettingsController;
 
 // Public auth routes
 Route::post('/login', [AuthController::class, 'login']);
@@ -26,4 +27,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
 	// Monitor logs (limit is configurable via ?limit=...) 
 	Route::get('/sites/{id}/logs', [MonitorLogController::class, 'index']);
+
+	// Settings
+	Route::get('/settings/monitor-interval', [SettingsController::class, 'getMonitorInterval']);
+	Route::post('/settings/monitor-interval', [SettingsController::class, 'setMonitorInterval']);
 });

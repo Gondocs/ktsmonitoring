@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use App\Models\Monitor;
 use App\Models\MonitorLog;
+use App\Models\Setting;
 
 class CheckSites extends Command
 {
@@ -14,6 +15,19 @@ class CheckSites extends Command
 
     public function handle()
     {
+        $defaultInterval = config('app.monitor_interval_minutes');
+        $intervalMinutes = (int) Setting::get('monitor_interval_minutes', $defaultInterval);
+
+        $lastCheck = Monitor::max('last_checked_at');
+
+        if ($lastCheck) {
+            $diffMinutes = now()->diffInMinutes($lastCheck);
+            if ($diffMinutes < $intervalMinutes) {
+                $this->info("Még nem telt le az intervallum ({$intervalMinutes} perc). Kihagyva.");
+                return 0;
+            }
+        }
+
         $monitors = Monitor::where('is_active', true)->get();
 
         foreach ($monitors as $monitor) {

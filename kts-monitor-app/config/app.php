@@ -123,4 +123,7 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    // Monitor check default interval in minutes (6 hours)
+    'monitor_interval_minutes' => env('MONITOR_INTERVAL_MINUTES', 360),
+
 ];
