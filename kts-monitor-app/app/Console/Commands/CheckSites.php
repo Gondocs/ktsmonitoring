@@ -10,7 +10,7 @@ use App\Models\Setting;
 
 class CheckSites extends Command
 {
-    protected $signature = 'sites:check';
+    protected $signature = 'sites:check {--force : Run checks ignoring interval limit}';
     protected $description = 'Weboldalak ellenőrzése';
 
     public function handle()
@@ -18,17 +18,22 @@ class CheckSites extends Command
         $defaultInterval = config('app.monitor_interval_minutes');
         $intervalMinutes = (int) Setting::get('monitor_interval_minutes', $defaultInterval);
 
-        $lastCheck = Monitor::max('last_checked_at');
+        $force = (bool) $this->option('force');
 
-        if ($lastCheck) {
-            $diffMinutes = now()->diffInMinutes($lastCheck);
-            if ($diffMinutes < $intervalMinutes) {
-                $this->info("Még nem telt le az intervallum ({$intervalMinutes} perc). Kihagyva.");
-                return 0;
+        if (!$force) {
+            $lastCheck = Monitor::max('last_checked_at');
+
+            if ($lastCheck) {
+                $diffMinutes = now()->diffInMinutes($lastCheck);
+                if ($diffMinutes < $intervalMinutes) {
+                    $this->info("Még nem telt le az intervallum ({$intervalMinutes} perc). Kihagyva.");
+                    return 0;
+                }
             }
         }
 
         $monitors = Monitor::where('is_active', true)->get();
+
 
         foreach ($monitors as $monitor) {
             $attempts = 3;
@@ -115,7 +120,7 @@ class CheckSites extends Command
                     'error_message' => $attemptError,
                     'checked_at' => now(),
                 ]);
-                
+
             }
 
             $avgStatus = empty($statusCodes) ? 0 : (int) round(array_sum($statusCodes) / count($statusCodes));
@@ -158,7 +163,7 @@ class CheckSites extends Command
         $host = parse_url($url, PHP_URL_HOST);
         $port = parse_url($url, PHP_URL_PORT) ?: 443;
 
-        if (! $host) {
+        if (!$host) {
             return null;
         }
 
@@ -172,7 +177,7 @@ class CheckSites extends Command
 
         $client = @stream_socket_client("ssl://{$host}:{$port}", $errno, $errstr, 5, STREAM_CLIENT_CONNECT, $context);
 
-        if (! $client) {
+        if (!$client) {
             return null;
         }
 
@@ -182,7 +187,7 @@ class CheckSites extends Command
         }
 
         $cert = openssl_x509_parse($params['options']['ssl']['peer_certificate']);
-        if (! $cert || empty($cert['validTo_time_t'])) {
+        if (!$cert || empty($cert['validTo_time_t'])) {
             return null;
         }
 

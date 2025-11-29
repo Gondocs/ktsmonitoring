@@ -90,7 +90,7 @@ class MonitorController extends Controller
     // POST /api/sites/check-all
     public function checkAll()
     {
-        Artisan::call('sites:check');
+        Artisan::call('sites:check', ['--force' => true]);
 
         return response()->json([
             'message' => 'All sites refreshed',
@@ -103,14 +103,12 @@ class MonitorController extends Controller
     {
         $monitor = Monitor::findOrFail($id);
 
-        // Újrafelhasználjuk az artisan logikát egyszerűség kedvéért: egyetlen site aktiválva
         $originalActive = $monitor->is_active;
         $monitor->is_active = true;
         $monitor->save();
 
-        Artisan::call('sites:check');
+        Artisan::call('sites:check', ['--force' => true]);
 
-        // Visszaállítjuk az eredeti állapotot
         $monitor->is_active = $originalActive;
         $monitor->save();
 
