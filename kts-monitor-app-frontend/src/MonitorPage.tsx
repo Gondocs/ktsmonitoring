@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { ClipLoader } from "react-spinners";
 import {
   FiRefreshCw,
   FiFileText,
@@ -381,10 +382,10 @@ export const MonitorPage: React.FC = () => {
           </div>
 
           <div>
-            <h2 className="text-xl font-semibold text-slate-50">
+            <h2 className="text-xl font-semibold text-slate-50 text-center">
               Monitorozott weboldalak
             </h2>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-400 text-center">
               Állapot, válaszidő, SSL lejárat és stabilitás egy helyen.
             </p>
           </div>
@@ -401,9 +402,14 @@ export const MonitorPage: React.FC = () => {
         </div>
 
         {loading ? (
-          <div className="flex items-center gap-3 text-sm text-slate-300">
-            <span className="h-4 w-4 border-2 border-slate-600 border-t-ktsRed rounded-full animate-spin" />
-            <span>Monitorozott weboldalak betöltése…</span>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <ClipLoader color="#073a59" size={70} />
           </div>
         ) : error ? (
           <p className="text-sm text-red-400">{error}</p>
