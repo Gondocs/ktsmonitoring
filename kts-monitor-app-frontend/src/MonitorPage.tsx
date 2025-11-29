@@ -57,6 +57,9 @@ export const MonitorPage: React.FC = () => {
   const [newUrl, setNewUrl] = useState("");
   const [newName, setNewName] = useState("");
 
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
   const [logModalMonitor, setLogModalMonitor] = useState<Monitor | null>(null);
   const [logs, setLogs] = useState<MonitorLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -259,7 +262,48 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
-  const activeSites = sites.filter((s) => s.is_active);
+  let activeSites = sites.filter((s) => s.is_active);
+
+  // Rendezés
+  activeSites = [...activeSites].sort((a, b) => {
+    let v1: any;
+    let v2: any;
+
+    switch (sortBy) {
+      case "name":
+        v1 = a.name?.toLowerCase() ?? "";
+        v2 = b.name?.toLowerCase() ?? "";
+        break;
+      case "response_time":
+        v1 = a.last_response_time_ms ?? 999999;
+        v2 = b.last_response_time_ms ?? 999999;
+        break;
+      case "status":
+        v1 = a.last_status ?? 0;
+        v2 = b.last_status ?? 0;
+        break;
+      case "redirect":
+        v1 = a.redirect_count ?? 0;
+        v2 = b.redirect_count ?? 0;
+        break;
+      case "stability":
+        v1 = a.stability_score ?? 0;
+        v2 = b.stability_score ?? 0;
+        break;
+      case "last_checked":
+        v1 = a.last_checked_at ? new Date(a.last_checked_at).getTime() : 0;
+        v2 = b.last_checked_at ? new Date(b.last_checked_at).getTime() : 0;
+        break;
+      default:
+        v1 = "";
+        v2 = "";
+    }
+
+    if (v1 < v2) return sortDirection === "asc" ? -1 : 1;
+    if (v1 > v2) return sortDirection === "asc" ? 1 : -1;
+    return 0;
+  });
+
   const inactiveSites = sites.filter((s) => !s.is_active);
 
   return (
@@ -311,6 +355,31 @@ export const MonitorPage: React.FC = () => {
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 mt-2 text-xs text-slate-300">
+            <label>Rendezés:</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1"
+            >
+              <option value="name">Név (A-Z)</option>
+              <option value="response_time">Válaszidő</option>
+              <option value="status">HTTP kód</option>
+              <option value="redirect">Átirányítás</option>
+              <option value="stability">Stabilitás</option>
+              <option value="last_checked">Utolsó ellenőrzés</option>
+            </select>
+
+            <button
+              onClick={() =>
+                setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+              }
+              className="px-2 py-1 rounded bg-slate-800 border border-slate-700"
+            >
+              {sortDirection === "asc" ? "▲" : "▼"}
+            </button>
+          </div>
+
           <div>
             <h2 className="text-xl font-semibold text-slate-50">
               Monitorozott weboldalak
