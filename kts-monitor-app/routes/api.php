@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\MonitorController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\MonitorLogController;
 
 // Public auth routes
 Route::post('/login', [AuthController::class, 'login']);
@@ -22,4 +23,7 @@ Route::middleware('auth:sanctum')->group(function () {
 	// Legacy monitors endpoints (optional)
 	Route::get('/monitors', [MonitorController::class, 'index']);
 	Route::post('/monitors/check', [MonitorController::class, 'checkAll']);
+
+	// Monitor logs (limit is configurable via ?limit=...) 
+	Route::get('/sites/{id}/logs', [MonitorLogController::class, 'index']);
 });
