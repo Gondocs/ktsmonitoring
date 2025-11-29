@@ -292,7 +292,110 @@ export const MonitorPage: React.FC = () => {
         ) : error ? (
           <p className="text-sm text-red-400">{error}</p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 shadow-lg">
+          <>
+          {/* Mobile / small-screen card layout */}
+          <div className="space-y-3 md:hidden">
+            {sites.length === 0 ? (
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-400 text-center">
+                Jelenleg nincs még monitorozott weboldal.
+              </div>
+            ) : (
+              sites.map((m) => {
+                const rowRefreshing = isRowRefreshing(m.id) || refreshing;
+                return (
+                  <div
+                    key={m.id}
+                    className={`rounded-xl border border-slate-800 bg-slate-900/70 p-3 shadow-sm flex flex-col gap-2 ${rowRefreshing ? "opacity-60 pointer-events-none" : ""}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-50 truncate" title={m.name}>
+                          {m.name || m.url}
+                        </p>
+                        <p className="text-xs text-slate-400 truncate" title={m.url}>
+                          {m.url}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleRefreshOne(m.id)}
+                          disabled={rowRefreshing}
+                          className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                          title="Frissítés"
+                        >
+                          <FiRefreshCw className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => openLogsModal(m)}
+                          className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
+                          title="Naplók"
+                        >
+                          <FiFileText className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(m.id)}
+                          className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-red-900/70 hover:bg-red-700 text-red-50 border border-red-700 transition"
+                          title="Törlés"
+                        >
+                          <FiTrash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 mt-1">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">HTTP</span>
+                        <span style={{ color: statusColor(m) }}>{m.last_status ?? "-"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Válaszidő</span>
+                        <span>{m.last_response_time_ms != null ? `${m.last_response_time_ms} ms` : "-"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">SSL napok</span>
+                        <span style={{ color: sslColor(m.ssl_days_remaining) }}>
+                          {m.ssl_days_remaining != null ? `${m.ssl_days_remaining} nap` : "-"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">HSTS</span>
+                        <span>{m.has_hsts ? "igen" : "nem"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Átirányítás</span>
+                        <span>{m.redirect_count ?? "-"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">WordPress</span>
+                        <span>
+                          {m.is_wordpress
+                            ? m.wordpress_version
+                              ? `WP ${m.wordpress_version}`
+                              : "WordPress"
+                            : "-"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Stabilitás</span>
+                        <span>{m.stability_score != null ? `${m.stability_score}%` : "-"}</span>
+                      </div>
+                      <div className="flex justify-between col-span-2">
+                        <span className="text-slate-400">Utolsó ellenőrzés</span>
+                        <span>
+                          {m.last_checked_at
+                            ? new Date(m.last_checked_at).toLocaleString()
+                            : "-"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop / tablet table layout */}
+          <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 shadow-lg">
             <table className="min-w-full text-[11px] sm:text-xs">
               <thead className="bg-slate-900/80 text-slate-300 text-[11px] uppercase tracking-wide">
                 <tr>
@@ -409,6 +512,7 @@ export const MonitorPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         <section className="mt-6 border border-dashed border-slate-700 rounded-xl bg-slate-900/60 p-4 space-y-3">
