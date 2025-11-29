@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { FiRefreshCw, FiFileText, FiTrash2, FiSettings } from "react-icons/fi";
+import {
+  FiRefreshCw,
+  FiFileText,
+  FiTrash2,
+  FiSettings,
+  FiEdit2,
+} from "react-icons/fi";
 import {
   fetchSites,
   checkAllSites,
@@ -9,6 +15,7 @@ import {
   fetchSiteLogs,
   getMonitorInterval,
   setMonitorInterval,
+  updateSite,
 } from "./api.ts";
 import { useAuth } from "./auth.tsx";
 
@@ -61,6 +68,12 @@ export const MonitorPage: React.FC = () => {
   );
   const [intervalLoading, setIntervalLoading] = useState(false);
   const [intervalSaving, setIntervalSaving] = useState(false);
+
+  const [editMonitor, setEditMonitor] = useState<Monitor | null>(null);
+  const [editUrl, setEditUrl] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
+  const [editSaving, setEditSaving] = useState(false);
 
   const loadSites = async () => {
     setLoading(true);
@@ -215,6 +228,40 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
+  const startEditMonitor = (monitor: Monitor) => {
+    setEditMonitor(monitor);
+    setEditUrl(monitor.url || "");
+    setEditName(monitor.name || "");
+    setEditIsActive(monitor.is_active);
+  };
+
+  const saveEditMonitor = async () => {
+    if (!editMonitor) return;
+    setEditSaving(true);
+    try {
+      let normalizedUrl = editUrl.trim();
+      if (normalizedUrl && !/^https?:\/\//i.test(normalizedUrl)) {
+        normalizedUrl = `https://${normalizedUrl}`;
+      }
+
+      await updateSite(editMonitor.id, {
+        url: normalizedUrl || undefined,
+        name: editName || null,
+        is_active: editIsActive,
+      });
+
+      await loadSites();
+      setEditMonitor(null);
+    } catch (err: any) {
+      alert(err.message || "Nem sikerült menteni a módosításokat.");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const activeSites = sites.filter((s) => s.is_active);
+  const inactiveSites = sites.filter((s) => !s.is_active);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50">
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-20">
@@ -293,185 +340,45 @@ export const MonitorPage: React.FC = () => {
           <p className="text-sm text-red-400">{error}</p>
         ) : (
           <>
-          {/* Mobile / small-screen card layout */}
-          <div className="space-y-3 md:hidden">
-            {sites.length === 0 ? (
-              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-400 text-center">
-                Jelenleg nincs még monitorozott weboldal.
-              </div>
-            ) : (
-              sites.map((m) => {
-                const rowRefreshing = isRowRefreshing(m.id) || refreshing;
-                return (
-                  <div
-                    key={m.id}
-                    className={`rounded-xl border border-slate-800 bg-slate-900/70 p-3 shadow-sm flex flex-col gap-2 ${rowRefreshing ? "opacity-60 pointer-events-none" : ""}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-50 truncate" title={m.name}>
-                          {m.name || m.url}
-                        </p>
-                        <p className="text-xs text-slate-400 truncate" title={m.url}>
-                          {m.url}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleRefreshOne(m.id)}
-                          disabled={rowRefreshing}
-                          className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                          title="Frissítés"
-                        >
-                          <FiRefreshCw className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => openLogsModal(m)}
-                          className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
-                          title="Naplók"
-                        >
-                          <FiFileText className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(m.id)}
-                          className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-red-900/70 hover:bg-red-700 text-red-50 border border-red-700 transition"
-                          title="Törlés"
-                        >
-                          <FiTrash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 mt-1">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">HTTP</span>
-                        <span style={{ color: statusColor(m) }}>{m.last_status ?? "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Válaszidő</span>
-                        <span>{m.last_response_time_ms != null ? `${m.last_response_time_ms} ms` : "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">SSL napok</span>
-                        <span style={{ color: sslColor(m.ssl_days_remaining) }}>
-                          {m.ssl_days_remaining != null ? `${m.ssl_days_remaining} nap` : "-"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">HSTS</span>
-                        <span>{m.has_hsts ? "igen" : "nem"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Átirányítás</span>
-                        <span>{m.redirect_count ?? "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">WordPress</span>
-                        <span>
-                          {m.is_wordpress
-                            ? m.wordpress_version
-                              ? `WP ${m.wordpress_version}`
-                              : "WordPress"
-                            : "-"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Stabilitás</span>
-                        <span>{m.stability_score != null ? `${m.stability_score}%` : "-"}</span>
-                      </div>
-                      <div className="flex justify-between col-span-2">
-                        <span className="text-slate-400">Utolsó ellenőrzés</span>
-                        <span>
-                          {m.last_checked_at
-                            ? new Date(m.last_checked_at).toLocaleString()
-                            : "-"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Desktop / tablet table layout */}
-          <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 shadow-lg">
-            <table className="min-w-full text-[11px] sm:text-xs">
-              <thead className="bg-slate-900/80 text-slate-300 text-[11px] uppercase tracking-wide">
-                <tr>
-                  <th className="px-3 py-2 text-left">Név</th>
-                  <th className="px-3 py-2 text-left">URL</th>
-                  <th className="px-3 py-2 text-center">HTTP</th>
-                  <th className="px-3 py-2 text-center">Válaszidő (ms)</th>
-                  <th className="px-3 py-2 text-center">SSL napok</th>
-                  <th className="px-3 py-2 text-center">HSTS</th>
-                  <th className="px-3 py-2 text-center">Átirányítás</th>
-                  <th className="px-3 py-2 text-center">WordPress</th>
-                  <th className="px-3 py-2 text-center">Stabilitás</th>
-                  <th className="px-3 py-2 text-center">Utolsó ellenőrzés</th>
-                  <th className="px-3 py-2">Műveletek</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {sites.map((m) => {
+            {/* Mobile / small-screen card layout for aktív oldalak */}
+            <div className="space-y-3 md:hidden">
+              {activeSites.length === 0 ? (
+                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-400 text-center">
+                  Jelenleg nincs még aktív monitorozott weboldal.
+                </div>
+              ) : (
+                activeSites.map((m) => {
                   const rowRefreshing = isRowRefreshing(m.id) || refreshing;
                   return (
-                    <tr
+                    <div
                       key={m.id}
-                      className={
-                        "hover:bg-slate-800/60 transition " +
-                        (rowRefreshing ? "opacity-60 pointer-events-none" : "")
-                      }
+                      className={`rounded-xl border border-slate-800 bg-slate-900/70 p-3 shadow-sm flex flex-col gap-2 ${
+                        rowRefreshing ? "opacity-60 pointer-events-none" : ""
+                      }`}
                     >
-                      <td className="px-3 py-2 font-medium text-slate-100 flex items-center gap-2">
-                        {rowRefreshing && (
-                          <span className="h-3 w-3 border-2 border-slate-500 border-t-ktsRed rounded-full animate-spin" />
-                        )}
-                        <span>{m.name}</span>
-                      </td>
-                      <td className="px-3 py-2 text-slate-300 break-all ">
-                        {m.url}
-                      </td>
-                      <td
-                        className="px-3 py-2 font-mono text-xs text-center"
-                        style={{ color: statusColor(m) }}
-                      >
-                        {m.last_status ?? "-"}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {m.last_response_time_ms ?? "-"}
-                      </td>
-                      <td
-                        className="px-3 py-2 font-mono text-xs text-center"
-                        style={{ color: sslColor(m.ssl_days_remaining) }}
-                      >
-                        {m.ssl_days_remaining != null
-                          ? `${m.ssl_days_remaining} nap`
-                          : "-"}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {m.has_hsts ? "igen" : "nem"}
-                      </td>
-                      <td className="px-3 py-2 text-center">{m.redirect_count ?? "-"}</td>
-                      <td className="px-3 py-2 text-center">
-                        {m.is_wordpress
-                          ? m.wordpress_version
-                            ? `WordPress ${m.wordpress_version}`
-                            : "WordPress"
-                          : "-"}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {m.stability_score != null
-                          ? `${m.stability_score}%`
-                          : "-"}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-center">
-                        {m.last_checked_at
-                          ? new Date(m.last_checked_at).toLocaleString()
-                          : "-"}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-nowrap items-center gap-1.5 justify-end min-w-[180px]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className="text-sm font-semibold text-slate-50 truncate"
+                            title={m.name}
+                          >
+                            {m.name || m.url}
+                          </p>
+                          <p
+                            className="text-xs text-slate-400 truncate"
+                            title={m.url}
+                          >
+                            {m.url}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => startEditMonitor(m)}
+                            className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
+                            title="Szerkesztés"
+                          >
+                            <FiEdit2 className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={() => handleRefreshOne(m.id)}
                             disabled={rowRefreshing}
@@ -495,23 +402,251 @@ export const MonitorPage: React.FC = () => {
                             <FiTrash2 className="h-4 w-4" />
                           </button>
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 mt-1">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">HTTP</span>
+                          <span style={{ color: statusColor(m) }}>
+                            {m.last_status ?? "-"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Válaszidő</span>
+                          <span>
+                            {m.last_response_time_ms != null
+                              ? `${m.last_response_time_ms} ms`
+                              : "-"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">SSL napok</span>
+                          <span
+                            style={{ color: sslColor(m.ssl_days_remaining) }}
+                          >
+                            {m.ssl_days_remaining != null
+                              ? `${m.ssl_days_remaining} nap`
+                              : "-"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">HSTS</span>
+                          <span>{m.has_hsts ? "igen" : "nem"}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Átirányítás</span>
+                          <span>{m.redirect_count ?? "-"}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">WordPress</span>
+                          <span>
+                            {m.is_wordpress
+                              ? m.wordpress_version
+                                ? `WP ${m.wordpress_version}`
+                                : "WordPress"
+                              : "-"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Stabilitás</span>
+                          <span>
+                            {m.stability_score != null
+                              ? `${m.stability_score}%`
+                              : "-"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between col-span-2">
+                          <span className="text-slate-400">
+                            Utolsó ellenőrzés
+                          </span>
+                          <span>
+                            {m.last_checked_at
+                              ? new Date(m.last_checked_at).toLocaleString()
+                              : "-"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop / tablet table layout */}
+            <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 shadow-lg">
+              <table className="min-w-full text-[11px] sm:text-xs">
+                <thead className="bg-slate-900/80 text-slate-300 text-[11px] uppercase tracking-wide">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Név</th>
+                    <th className="px-3 py-2 text-left">URL</th>
+                    <th className="px-3 py-2 text-center">HTTP</th>
+                    <th className="px-3 py-2 text-center">Válaszidő (ms)</th>
+                    <th className="px-3 py-2 text-center">SSL napok</th>
+                    <th className="px-3 py-2 text-center">HSTS</th>
+                    <th className="px-3 py-2 text-center">Átirányítás</th>
+                    <th className="px-3 py-2 text-center">WordPress</th>
+                    <th className="px-3 py-2 text-center">Stabilitás</th>
+                    <th className="px-3 py-2 text-center">Utolsó ellenőrzés</th>
+                    <th className="px-3 py-2">Műveletek</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {activeSites.map((m) => {
+                    const rowRefreshing = isRowRefreshing(m.id) || refreshing;
+                    return (
+                      <tr
+                        key={m.id}
+                        className={
+                          "hover:bg-slate-800/60 transition " +
+                          (rowRefreshing
+                            ? "opacity-60 pointer-events-none"
+                            : "")
+                        }
+                      >
+                        <td className="px-3 py-2 font-medium text-slate-100 flex items-center gap-2">
+                          {rowRefreshing && (
+                            <span className="h-3 w-3 border-2 border-slate-500 border-t-ktsRed rounded-full animate-spin" />
+                          )}
+                          <span>{m.name}</span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-300 break-all ">
+                          {m.url}
+                        </td>
+                        <td
+                          className="px-3 py-2 font-mono text-xs text-center"
+                          style={{ color: statusColor(m) }}
+                        >
+                          {m.last_status ?? "-"}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {m.last_response_time_ms ?? "-"}
+                        </td>
+                        <td
+                          className="px-3 py-2 font-mono text-xs text-center"
+                          style={{ color: sslColor(m.ssl_days_remaining) }}
+                        >
+                          {m.ssl_days_remaining != null
+                            ? `${m.ssl_days_remaining} nap`
+                            : "-"}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {m.has_hsts ? "igen" : "nem"}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {m.redirect_count ?? "-"}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {m.is_wordpress
+                            ? m.wordpress_version
+                              ? `WordPress ${m.wordpress_version}`
+                              : "WordPress"
+                            : "-"}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {m.stability_score != null
+                            ? `${m.stability_score}%`
+                            : "-"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-center">
+                          {m.last_checked_at
+                            ? new Date(m.last_checked_at).toLocaleString()
+                            : "-"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-nowrap items-center gap-1.5 justify-end min-w-[220px]">
+                            <button
+                              onClick={() => startEditMonitor(m)}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
+                              title="Szerkesztés"
+                            >
+                              <FiEdit2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleRefreshOne(m.id)}
+                              disabled={rowRefreshing}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                              title="Frissítés"
+                            >
+                              <FiRefreshCw className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => openLogsModal(m)}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
+                              title="Naplók"
+                            >
+                              <FiFileText className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(m.id)}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-red-900/70 hover:bg-red-700 text-red-50 border border-red-700 transition"
+                              title="Törlés"
+                            >
+                              <FiTrash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {activeSites.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={11}
+                        className="px-3 py-6 text-center text-sm text-slate-400"
+                      >
+                        Jelenleg nincs még aktív monitorozott weboldal.
                       </td>
                     </tr>
-                  );
-                })}
-                {sites.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={11}
-                      className="px-3 py-6 text-center text-sm text-slate-400"
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Inaktív weboldalak szekció */}
+            {inactiveSites.length > 0 && (
+              <section className="mt-6 space-y-2">
+                <h3 className="text-sm font-semibold text-slate-200">
+                  Inaktív weboldalak
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Ezek a weboldalak jelenleg nincsenek aktívan monitorozva.
+                </p>
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {inactiveSites.map((m) => (
+                    <div
+                      key={m.id}
+                      className="rounded-xl border border-slate-800 bg-slate-900/70 p-3 text-xs text-slate-300 flex flex-col gap-2"
                     >
-                      Jelenleg nincs még monitorozott weboldal.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p
+                            className="font-semibold text-slate-100 truncate"
+                            title={m.name || m.url}
+                          >
+                            {m.name || m.url}
+                          </p>
+                          <p className="text-[11px] text-slate-400 break-all">
+                            {m.url}
+                          </p>
+                        </div>
+                        <span className="inline-flex items-center rounded-full bg-slate-800 text-[10px] px-2 py-0.5 text-amber-300 border border-amber-500/50">
+                          Inaktív
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 mt-1">
+                        <button
+                          type="button"
+                          onClick={() => startEditMonitor(m)}
+                          className="inline-flex items-center justify-center rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 border border-slate-700 text-[11px]"
+                        >
+                          Szerkesztés
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
 
@@ -527,13 +662,14 @@ export const MonitorPage: React.FC = () => {
             className="flex flex-col sm:flex-row gap-3 flex-wrap"
           >
             <input
-              type="url"
-              placeholder="https://pelda.hu"
+              type="text"
+              placeholder="URL"
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
               required
               className="flex-1 min-w-[220px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-ktsRed focus:border-ktsRed transition"
             />
+
             <input
               type="text"
               placeholder="Opcionális megjelenített név"
@@ -716,6 +852,88 @@ export const MonitorPage: React.FC = () => {
                 className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
               >
                 {intervalSaving ? "Mentés…" : "Mentés"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit monitor modal */}
+      {editMonitor && (
+        <div
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/70"
+          onClick={() => setEditMonitor(null)}
+        >
+          <div
+            className="max-w-md w-[94%] rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-semibold text-slate-50">
+                  Monitor szerkesztése
+                </h3>
+                <p className="text-xs text-slate-400 break-all">
+                  {editMonitor.url}
+                </p>
+              </div>
+              <button
+                onClick={() => setEditMonitor(null)}
+                className="inline-flex items-center rounded-full bg-slate-800 hover:bg-slate-700 text-xs text-slate-100 px-3 py-1.5 border border-slate-600 transition"
+              >
+                Bezárás
+              </button>
+            </div>
+
+            <div className="space-y-3 text-sm text-slate-200">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-300">
+                  URL
+                </label>
+                <input
+                  type="text"
+                  value={editUrl}
+                  onChange={(e) => setEditUrl(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-ktsRed focus:border-ktsRed transition"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-slate-300">
+                  Megjelenített név (opcionális)
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-ktsRed focus:border-ktsRed transition"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={editIsActive}
+                  onChange={(e) => setEditIsActive(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-ktsRed focus:ring-ktsRed"
+                />
+                <span>Aktív monitorozás engedélyezése</span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-1">
+              <button
+                onClick={() => setEditMonitor(null)}
+                className="inline-flex items-center rounded-full bg-slate-800 hover:bg-slate-700 text-xs text-slate-100 px-4 py-1.5 border border-slate-600 transition"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveEditMonitor}
+                disabled={editSaving}
+                className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
+              >
+                {editSaving ? "Mentés…" : "Mentés"}
               </button>
             </div>
           </div>

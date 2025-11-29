@@ -198,6 +198,53 @@ class SwaggerController extends Controller
                             ],
                         ],
                     ],
+                    'put' => [
+                        'tags' => ['Sites'],
+                        'summary' => 'Update a site (URL, name, active flag)',
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'schema' => [
+                                    'type' => 'integer',
+                                ],
+                            ],
+                        ],
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'url' => [
+                                                'type' => 'string',
+                                                'format' => 'uri',
+                                            ],
+                                            'name' => [
+                                                'type' => 'string',
+                                            ],
+                                            'is_active' => [
+                                                'type' => 'boolean',
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Site updated',
+                            ],
+                            '401' => [
+                                'description' => 'Unauthorized',
+                            ],
+                            '404' => [
+                                'description' => 'Not found',
+                            ],
+                        ],
+                    ],
                 ],
                 '/sites/check-all' => [
                     'post' => [

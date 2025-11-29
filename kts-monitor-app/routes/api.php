@@ -17,6 +17,8 @@ Route::middleware('auth:sanctum')->group(function () {
 	// Sites API (primary)
 	Route::get('/sites', [MonitorController::class, 'index']);
 	Route::post('/sites', [MonitorController::class, 'store']);
+	Route::put('/sites/{id}', [MonitorController::class, 'update']);
+	Route::patch('/sites/{id}', [MonitorController::class, 'update']);
 	Route::delete('/sites/{id}', [MonitorController::class, 'destroy']);
 	Route::post('/sites/check-all', [MonitorController::class, 'checkAll']);
 	Route::post('/sites/{id}/check', [MonitorController::class, 'checkOne']);

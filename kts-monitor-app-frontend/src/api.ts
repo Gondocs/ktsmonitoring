@@ -69,6 +69,13 @@ export async function deleteSite(id: number) {
 	});
 }
 
+export async function updateSite(id: number, payload: { url?: string; name?: string | null; is_active?: boolean }) {
+	return apiFetch(`/sites/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(payload),
+	});
+}
+
 export async function checkAllSites() {
 	return apiFetch('/sites/check-all', {
 		method: 'POST',

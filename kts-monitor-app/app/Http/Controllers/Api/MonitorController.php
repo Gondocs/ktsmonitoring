@@ -50,6 +50,34 @@ class MonitorController extends Controller
         return response()->json($monitor, 201);
     }
 
+    // PUT/PATCH /api/sites/{id}
+    public function update(Request $request, int $id)
+    {
+        $monitor = Monitor::findOrFail($id);
+
+        $data = $request->validate([
+            'url' => ['sometimes', 'required', 'url'],
+            'name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'is_active' => ['sometimes', 'boolean'],
+        ]);
+
+        if (array_key_exists('url', $data)) {
+            $monitor->url = $data['url'];
+        }
+
+        if (array_key_exists('name', $data)) {
+            $monitor->name = $data['name'] ?? $monitor->url;
+        }
+
+        if (array_key_exists('is_active', $data)) {
+            $monitor->is_active = $data['is_active'];
+        }
+
+        $monitor->save();
+
+        return response()->json($monitor);
+    }
+
     // DELETE /api/sites/{id}
     public function destroy(int $id)
     {
