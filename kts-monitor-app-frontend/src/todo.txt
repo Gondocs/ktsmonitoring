@@ -12,4 +12,10 @@
 
 - Szövegek középre igazítása
 
-- 
+- Felhasználó létrehozása
+
+- Tesztek írása
+
+- A weboldalak url hozzáadása elég legyen csak a domain név pl: kts.hu
+
+- Stabilítás ellenőrzése, hogy megfelelő-e a számítás
