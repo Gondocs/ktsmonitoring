@@ -2,6 +2,24 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\MonitorController;
+use App\Http\Controllers\Api\AuthController;
 
-Route::get('/monitors', [MonitorController::class, 'index']);
-Route::post('/monitors/check', [MonitorController::class, 'check']);
+// Public auth routes
+Route::post('/login', [AuthController::class, 'login']);
+
+// Routes that require a valid Sanctum token in the Authorization header
+Route::middleware('auth:sanctum')->group(function () {
+	Route::post('/logout', [AuthController::class, 'logout']);
+	Route::get('/me', [AuthController::class, 'me']);
+
+	// Sites API (primary)
+	Route::get('/sites', [MonitorController::class, 'index']);
+	Route::post('/sites', [MonitorController::class, 'store']);
+	Route::delete('/sites/{id}', [MonitorController::class, 'destroy']);
+	Route::post('/sites/check-all', [MonitorController::class, 'checkAll']);
+	Route::post('/sites/{id}/check', [MonitorController::class, 'checkOne']);
+
+	// Legacy monitors endpoints (optional)
+	Route::get('/monitors', [MonitorController::class, 'index']);
+	Route::post('/monitors/check', [MonitorController::class, 'checkAll']);
+});

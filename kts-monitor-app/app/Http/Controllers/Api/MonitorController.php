@@ -5,19 +5,76 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Monitor;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Http\Request;
 
 class MonitorController extends Controller
 {
-    // Listázás (GET)
+    // GET /api/sites
     public function index()
     {
-        return response()->json(Monitor::orderBy('name')->get());
+        return response()->json(
+            Monitor::orderBy('name')->get(['id', 'url', 'name', 'last_status', 'last_checked_at', 'is_active'])
+        );
     }
 
-    // Manuális frissítés indítása (POST)
-    public function check()
+    // POST /api/sites
+    public function store(Request $request)
     {
-        Artisan::call('sites:check'); // Lefuttatja a fenti parancsot
-        return response()->json(['message' => 'Frissítés lefutott', 'data' => Monitor::all()]);
+        $data = $request->validate([
+            'url' => ['required', 'url'],
+            'name' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $monitor = Monitor::create([
+            'url' => $data['url'],
+            'name' => $data['name'] ?? $data['url'],
+            'is_active' => true,
+        ]);
+
+        return response()->json($monitor, 201);
+    }
+
+    // DELETE /api/sites/{id}
+    public function destroy(int $id)
+    {
+        $monitor = Monitor::findOrFail($id);
+        $monitor->delete();
+
+        return response()->json(['message' => 'Site deleted']);
+    }
+
+    // POST /api/sites/check-all
+    public function checkAll()
+    {
+        Artisan::call('sites:check');
+
+        return response()->json([
+            'message' => 'All sites refreshed',
+            'data' => Monitor::orderBy('name')->get(),
+        ]);
+    }
+
+    // POST /api/sites/{id}/check
+    public function checkOne(int $id)
+    {
+        $monitor = Monitor::findOrFail($id);
+
+        // Újrafelhasználjuk az artisan logikát egyszerűség kedvéért: egyetlen site aktiválva
+        $originalActive = $monitor->is_active;
+        $monitor->is_active = true;
+        $monitor->save();
+
+        Artisan::call('sites:check');
+
+        // Visszaállítjuk az eredeti állapotot
+        $monitor->is_active = $originalActive;
+        $monitor->save();
+
+        $monitor->refresh();
+
+        return response()->json([
+            'message' => 'Site refreshed',
+            'data' => $monitor,
+        ]);
     }
 }

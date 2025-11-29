@@ -40,6 +40,13 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        // API requests will be authenticated via Laravel Sanctum using the
+        // `auth:sanctum` middleware instead of the legacy token guard.
+        'api' => [
+            'driver' => 'sanctum',
+            'provider' => 'users',
+        ],
     ],
 
     /*
