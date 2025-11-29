@@ -321,7 +321,7 @@ export const MonitorPage: React.FC = () => {
                 Weboldal monitoring felület
               </span>
               <h1 className="text-lg font-semibold text-slate-50 hidden sm:block">
-                Weboldal monitorozó áttekintés
+                KTS Online Monitor
               </h1>
             </div>
           </div>
