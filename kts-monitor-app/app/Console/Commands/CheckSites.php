@@ -158,7 +158,7 @@ class CheckSites extends Command
     /**
      * Lekéri az SSL tanúsítvány lejárati idejét és hátralévő napokat.
      */
-    protected function getSslInfo(string $url): ?array
+    public function getSslInfo(string $url): ?array
     {
         $host = parse_url($url, PHP_URL_HOST);
         $port = parse_url($url, PHP_URL_PORT) ?: 443;

@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Monitor;
+use App\Models\MonitorLog;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Request;
 
 class MonitorController extends Controller
@@ -103,14 +105,113 @@ class MonitorController extends Controller
     {
         $monitor = Monitor::findOrFail($id);
 
-        $originalActive = $monitor->is_active;
-        $monitor->is_active = true;
-        $monitor->save();
+        $attempts = 3;
+        $successCount = 0;
+        $statusCodes = [];
+        $responseTimes = [];
 
-        Artisan::call('sites:check', ['--force' => true]);
+        $sslDaysRemaining = null;
+        $sslExpiresAt = null;
+        $hasHsts = null;
+        $redirectCount = null;
+        $isWordpress = null;
+        $wordpressVersion = null;
+        $contentLastModifiedAt = null;
 
-        $monitor->is_active = $originalActive;
-        $monitor->save();
+        for ($i = 0; $i < $attempts; $i++) {
+            $attemptStatus = null;
+            $attemptResponseTime = null;
+            $attemptError = null;
+
+            try {
+                $start = microtime(true);
+                $response = Http::timeout(5)->withOptions([
+                    'allow_redirects' => [
+                        'max' => 10,
+                        'track_redirects' => true,
+                    ],
+                ])->get($monitor->url);
+                $end = microtime(true);
+
+                $attemptStatus = $response->status();
+                $attemptResponseTime = (int) round(($end - $start) * 1000);
+
+                $statusCodes[] = $attemptStatus;
+                $responseTimes[] = $attemptResponseTime;
+
+                if ($attemptStatus >= 200 && $attemptStatus < 400) {
+                    $successCount++;
+                }
+
+                if ($i === 0) {
+                    $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+                    if ($redirectHistory !== null) {
+                        $redirectUrls = array_filter(explode(', ', $redirectHistory));
+                        $redirectCount = count($redirectUrls);
+                    }
+
+                    $hasHsts = $response->hasHeader('Strict-Transport-Security');
+
+                    $body = $response->body();
+                    if (stripos($body, 'WordPress') !== false) {
+                        $isWordpress = true;
+
+                        if (preg_match('/<meta[^>]+name=["\']generator["\'][^>]*content=["\']WordPress\s*([^"\']+)["\']/i', $body, $m)) {
+                            $wordpressVersion = trim($m[1]);
+                        }
+                    } else {
+                        $isWordpress = false;
+                    }
+
+                    $lastModified = $response->header('Last-Modified');
+                    if ($lastModified) {
+                        try {
+                            $contentLastModifiedAt = new \DateTime($lastModified);
+                        } catch (\Exception $e) {
+                            $contentLastModifiedAt = null;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                $attemptError = $e->getMessage();
+            }
+
+            MonitorLog::create([
+                'monitor_id' => $monitor->id,
+                'status_code' => $attemptStatus,
+                'response_time_ms' => $attemptResponseTime,
+                'error_message' => $attemptError,
+                'checked_at' => now(),
+            ]);
+        }
+
+        $avgStatus = empty($statusCodes) ? 0 : (int) round(array_sum($statusCodes) / count($statusCodes));
+        $avgResponseTime = empty($responseTimes) ? null : (int) round(array_sum($responseTimes) / count($responseTimes));
+
+        $stabilityScore = (int) round(($successCount / $attempts) * 100);
+
+        if (str_starts_with($monitor->url, 'https://')) {
+            $checker = new \App\Console\Commands\CheckSites();
+            $sslInfo = $checker->getSslInfo($monitor->url);
+            if ($sslInfo !== null) {
+                $sslDaysRemaining = $sslInfo['days_remaining'];
+                $sslExpiresAt = $sslInfo['expires_at'];
+            }
+        }
+
+        $monitor->update([
+            'last_status' => $avgStatus,
+            'last_response_time_ms' => $avgResponseTime,
+            'ssl_days_remaining' => $sslDaysRemaining,
+            'ssl_expires_at' => $sslExpiresAt,
+            'has_hsts' => $hasHsts,
+            'redirect_count' => $redirectCount,
+            'is_wordpress' => $isWordpress,
+            'wordpress_version' => $wordpressVersion,
+            'content_last_modified_at' => $contentLastModifiedAt,
+            'stability_score' => $stabilityScore,
+            'last_checked_at' => now(),
+        ]);
 
         $monitor->refresh();
 
