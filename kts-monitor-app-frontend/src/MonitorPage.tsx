@@ -41,6 +41,7 @@ export const MonitorPage: React.FC = () => {
 	const [sites, setSites] = useState<Monitor[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [refreshing, setRefreshing] = useState(false);
+	const [refreshingIds, setRefreshingIds] = useState<number[]>([]);
 	const [error, setError] = useState<string | null>(null);
 
 	const [newUrl, setNewUrl] = useState('');
@@ -81,11 +82,14 @@ export const MonitorPage: React.FC = () => {
 	};
 
 	const handleRefreshOne = async (id: number) => {
+		setRefreshingIds(prev => (prev.includes(id) ? prev : [...prev, id]));
 		try {
 			await checkOneSite(id);
 			await loadSites();
 		} catch (err: any) {
 			alert(err.message || 'Nem sikerült frissíteni a weboldalt.');
+		} finally {
+			setRefreshingIds(prev => prev.filter(x => x !== id));
 		}
 	};
 
@@ -160,6 +164,8 @@ export const MonitorPage: React.FC = () => {
 		return 'green';
 	};
 
+	const isRowRefreshing = (id: number) => refreshingIds.includes(id);
+
 	return (
 		<div className="min-h-screen bg-slate-950 text-slate-50">
 			<header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-20">
@@ -205,15 +211,21 @@ export const MonitorPage: React.FC = () => {
 					</div>
 					<button
 						onClick={handleRefreshAll}
-						disabled={refreshing}
-						className="inline-flex items-center justify-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white shadow-md shadow-ktsRed/30 transition"
+						disabled={refreshing || loading}
+						className="inline-flex items-center justify-center gap-2 rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white shadow-md shadow-ktsRed/30 transition"
 					>
+						{refreshing && (
+							<span className="h-4 w-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+						)}
 						{refreshing ? 'Összes frissítése…' : 'Összes weboldal frissítése'}
 					</button>
 				</div>
 
 				{loading ? (
-					<p className="text-sm text-slate-300">Betöltés…</p>
+					<div className="flex items-center gap-3 text-sm text-slate-300">
+						<span className="h-4 w-4 border-2 border-slate-600 border-t-ktsRed rounded-full animate-spin" />
+						<span>Monitorozott weboldalak betöltése…</span>
+					</div>
 				) : error ? (
 					<p className="text-sm text-red-400">{error}</p>
 				) : (
@@ -235,54 +247,69 @@ export const MonitorPage: React.FC = () => {
 								</tr>
 							</thead>
 							<tbody className="divide-y divide-slate-800/80">
-								{sites.map(m => (
-									<tr key={m.id} className="hover:bg-slate-800/60">
-										<td className="px-3 py-2 font-medium text-slate-100">{m.name}</td>
-										<td className="px-3 py-2 text-slate-300 break-all">{m.url}</td>
-										<td className="px-3 py-2 font-mono text-xs" style={{ color: statusColor(m) }}>
-											{m.last_status ?? '-'}
-										</td>
-										<td className="px-3 py-2">{m.last_response_time_ms ?? '-'}</td>
-										<td className="px-3 py-2 font-mono text-xs" style={{ color: sslColor(m.ssl_days_remaining) }}>
-											{m.ssl_days_remaining != null ? `${m.ssl_days_remaining} nap` : '-'}
-										</td>
-										<td className="px-3 py-2">{m.has_hsts ? 'igen' : 'nem'}</td>
-										<td className="px-3 py-2">{m.redirect_count ?? '-'}</td>
-										<td className="px-3 py-2">
-											{m.is_wordpress
-													? m.wordpress_version
-														? `WordPress ${m.wordpress_version}`
-														: 'WordPress'
-												: '-'}
-										</td>
-										<td className="px-3 py-2">{m.stability_score != null ? `${m.stability_score}%` : '-'}</td>
-										<td className="px-3 py-2 whitespace-nowrap">
-											{m.last_checked_at ? new Date(m.last_checked_at).toLocaleString() : '-'}
-										</td>
-										<td className="px-3 py-2">
-											<div className="flex flex-wrap gap-1.5">
-												<button
-													onClick={() => handleRefreshOne(m.id)}
-													className="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-100 border border-slate-700 transition"
-												>
-													Frissítés
-												</button>
-												<button
-													onClick={() => openLogsModal(m)}
-													className="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-100 border border-slate-700 transition"
-												>
-													Naplók
-												</button>
-												<button
-													onClick={() => handleDelete(m.id)}
-													className="px-2 py-1 rounded-full bg-red-900/70 hover:bg-red-700 text-[11px] text-red-50 border border-red-700 transition"
-												>
-													Törlés
-												</button>
-											</div>
-										</td>
-									</tr>
-								))}
+								{sites.map(m => {
+									const rowRefreshing = isRowRefreshing(m.id) || refreshing;
+									return (
+										<tr
+											key={m.id}
+											className={
+												'hover:bg-slate-800/60 transition ' +
+												(rowRefreshing ? 'opacity-60 pointer-events-none' : '')
+											}
+										>
+											<td className="px-3 py-2 font-medium text-slate-100 flex items-center gap-2">
+												{rowRefreshing && (
+													<span className="h-3 w-3 border-2 border-slate-500 border-t-ktsRed rounded-full animate-spin" />
+												)}
+												<span>{m.name}</span>
+											</td>
+											<td className="px-3 py-2 text-slate-300 break-all">{m.url}</td>
+											<td className="px-3 py-2 font-mono text-xs" style={{ color: statusColor(m) }}>
+												{m.last_status ?? '-'}
+											</td>
+											<td className="px-3 py-2">{m.last_response_time_ms ?? '-'}</td>
+											<td className="px-3 py-2 font-mono text-xs" style={{ color: sslColor(m.ssl_days_remaining) }}>
+												{m.ssl_days_remaining != null ? `${m.ssl_days_remaining} nap` : '-'}
+											</td>
+											<td className="px-3 py-2">{m.has_hsts ? 'igen' : 'nem'}</td>
+											<td className="px-3 py-2">{m.redirect_count ?? '-'}</td>
+											<td className="px-3 py-2">
+												{m.is_wordpress
+														? m.wordpress_version
+															? `WordPress ${m.wordpress_version}`
+															: 'WordPress'
+													: '-'}
+											</td>
+											<td className="px-3 py-2">{m.stability_score != null ? `${m.stability_score}%` : '-'}</td>
+											<td className="px-3 py-2 whitespace-nowrap">
+												{m.last_checked_at ? new Date(m.last_checked_at).toLocaleString() : '-'}
+											</td>
+											<td className="px-3 py-2">
+												<div className="flex flex-nowrap items-center gap-1.5 justify-end min-w-[180px]">
+													<button
+														onClick={() => handleRefreshOne(m.id)}
+														disabled={rowRefreshing}
+														className="px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-100 border border-slate-700 whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed transition"
+													>
+														Frissítés
+													</button>
+													<button
+														onClick={() => openLogsModal(m)}
+														className="px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-100 border border-slate-700 whitespace-nowrap transition"
+													>
+														Naplók
+													</button>
+													<button
+														onClick={() => handleDelete(m.id)}
+														className="px-3 py-1 rounded-full bg-red-900/70 hover:bg-red-700 text-[11px] text-red-50 border border-red-700 whitespace-nowrap transition"
+													>
+														Törlés
+													</button>
+												</div>
+											</td>
+										</tr>
+									);
+								})}
 								{sites.length === 0 && (
 									<tr>
 										<td colSpan={11} className="px-3 py-6 text-center text-sm text-slate-400">

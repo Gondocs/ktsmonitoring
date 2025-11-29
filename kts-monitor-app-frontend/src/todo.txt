@@ -1,0 +1,15 @@
+- Beállítások, hogy mennyi időnként ellenőrizze a szolgáltatásokat
+
+- Routing
+
+- CSS javítások
+
+- Mobil és tablet nézet
+
+- Jelenlegi URL és nevek szerkesztése
+
+- Színek megváltoztatása
+
+- Szövegek középre igazítása
+
+- 

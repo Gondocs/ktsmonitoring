@@ -6,8 +6,8 @@ type Props = {
 
 export const LoginPage: React.FC<Props> = ({ onLoggedIn }) => {
 	const { login } = useAuth();
-	const [email, setEmail] = useState('teszt@example.com');
-	const [password, setPassword] = useState('jelszo');
+	const [email, setEmail] = useState('test@example.com');
+	const [password, setPassword] = useState('password');
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 
