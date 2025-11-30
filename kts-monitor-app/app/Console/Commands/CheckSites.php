@@ -34,12 +34,12 @@ class CheckSites extends Command
 
         $monitors = Monitor::where('is_active', true)->get();
 
-
         foreach ($monitors as $monitor) {
-            $attempts = 3;
+            $maxAttempts = 3; // max próbálkozás
             $successCount = 0;
             $statusCodes = [];
             $responseTimes = [];
+            $attemptsDone = 0;
 
             $sslDaysRemaining = null;
             $sslExpiresAt = null;
@@ -49,7 +49,9 @@ class CheckSites extends Command
             $wordpressVersion = null;
             $contentLastModifiedAt = null;
 
-            for ($i = 0; $i < $attempts; $i++) {
+            for ($i = 0; $i < $maxAttempts; $i++) {
+                $attemptsDone++;
+
                 $attemptStatus = null;
                 $attemptResponseTime = null;
                 $attemptError = null;
@@ -70,42 +72,54 @@ class CheckSites extends Command
                     $statusCodes[] = $attemptStatus;
                     $responseTimes[] = $attemptResponseTime;
 
-                    if ($attemptStatus >= 200 && $attemptStatus < 400) {
+                    // Sikernek csak a 200-at tekintjük
+                    if ($attemptStatus === 200) {
                         $successCount++;
-                    }
 
-                    // Első sikeres próbálkozáskor gyűjtjük a "lassabb" metaadatokat
-                    if ($i === 0) {
-                        // Redirect lánc hossza (Guzzle header)
-                        $redirectHistory = $response->header('X-Guzzle-Redirect-History');
-                        if ($redirectHistory !== null) {
-                            $redirectUrls = array_filter(explode(', ', $redirectHistory));
-                            $redirectCount = count($redirectUrls);
-                        }
-
-                        // HSTS
-                        $hasHsts = $response->hasHeader('Strict-Transport-Security');
-
-                        // WordPress detection (meta generator vagy X-Powered-By)
-                        $body = $response->body();
-                        if (stripos($body, 'WordPress') !== false) {
-                            $isWordpress = true;
-
-                            if (preg_match('/<meta[^>]+name=["\']generator["\'][^>]*content=["\']WordPress\s*([^"\']+)["\']/i', $body, $m)) {
-                                $wordpressVersion = trim($m[1]);
+                        // Lassabb metaadatok az első sikeres próbálkozáskor
+                        if ($successCount === 1) {
+                            // Redirect lánc hossza (Guzzle header)
+                            $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+                            if ($redirectHistory !== null) {
+                                $redirectUrls = array_filter(explode(', ', $redirectHistory));
+                                $redirectCount = count($redirectUrls);
                             }
-                        } else {
-                            $isWordpress = false;
-                        }
 
-                        // Last-Modified header
-                        $lastModified = $response->header('Last-Modified');
-                        if ($lastModified) {
-                            try {
-                                $contentLastModifiedAt = new \DateTime($lastModified);
-                            } catch (\Exception $e) {
-                                $contentLastModifiedAt = null;
+                            // HSTS
+                            $hasHsts = $response->hasHeader('Strict-Transport-Security');
+
+                            // WordPress detection
+                            $body = $response->body();
+                            if (stripos($body, 'WordPress') !== false) {
+                                $isWordpress = true;
+
+                                if (preg_match('/<meta[^>]+name=["\']generator["\'][^>]*content=["\']WordPress\s*([^"\']+)["\']/i', $body, $m)) {
+                                    $wordpressVersion = trim($m[1]);
+                                }
+                            } else {
+                                $isWordpress = false;
                             }
+
+                            // Last-Modified header
+                            $lastModified = $response->header('Last-Modified');
+                            if ($lastModified) {
+                                try {
+                                    $contentLastModifiedAt = new \DateTime($lastModified);
+                                } catch (\Exception $e) {
+                                    $contentLastModifiedAt = null;
+                                }
+                            }
+                        }
+                    } else {
+                        // Ha nem 200, de még az első próbálkozás, akkor is gyűjtsünk alap metaadatokat
+                        if ($i === 0 && $successCount === 0) {
+                            $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+                            if ($redirectHistory !== null) {
+                                $redirectUrls = array_filter(explode(', ', $redirectHistory));
+                                $redirectCount = count($redirectUrls);
+                            }
+
+                            $hasHsts = $response->hasHeader('Strict-Transport-Security');
                         }
                     }
                 } catch (\Exception $e) {
@@ -121,15 +135,20 @@ class CheckSites extends Command
                     'checked_at' => now(),
                 ]);
 
+                // Ha sikeres (200), nem próbálkozunk tovább
+                if ($attemptStatus === 200) {
+                    break;
+                }
             }
 
             $avgStatus = empty($statusCodes) ? 0 : (int) round(array_sum($statusCodes) / count($statusCodes));
             $avgResponseTime = empty($responseTimes) ? null : (int) round(array_sum($responseTimes) / count($responseTimes));
 
-            // Stabilitási score (0-100)
-            $stabilityScore = (int) round(($successCount / $attempts) * 100);
+            // Stabilitási score (0-100) az elvégzett próbálkozások alapján
+            $attemptsForScore = max(1, $attemptsDone);
+            $stabilityScore = (int) round(($successCount / $attemptsForScore) * 100);
 
-            // Ha HTTPS, próbáljuk kiolvasni a cert lejáratát (csak első futáskor vagy ha üres)
+            // Ha HTTPS, próbáljuk kiolvasni a cert lejáratát
             if (str_starts_with($monitor->url, 'https://')) {
                 $sslInfo = $this->getSslInfo($monitor->url);
                 if ($sslInfo !== null) {
@@ -152,6 +171,7 @@ class CheckSites extends Command
                 'last_checked_at' => now(),
             ]);
         }
+
         $this->info('Kész.');
     }
 

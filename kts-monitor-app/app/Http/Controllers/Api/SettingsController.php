@@ -30,4 +30,27 @@ class SettingsController extends Controller
             'interval_minutes' => (int) $data['interval_minutes'],
         ]);
     }
+
+    public function getLightMonitorInterval()
+    {
+        $default = config('app.monitor_interval_light_minutes');
+        $value = (int) Setting::get('monitor_interval_light_minutes', $default);
+
+        return response()->json([
+            'interval_minutes' => $value,
+        ]);
+    }
+
+    public function setLightMonitorInterval(Request $request)
+    {
+        $data = $request->validate([
+            'interval_minutes' => 'required|integer|min:1|max:10080',
+        ]);
+
+        Setting::set('monitor_interval_light_minutes', $data['interval_minutes']);
+
+        return response()->json([
+            'interval_minutes' => (int) $data['interval_minutes'],
+        ]);
+    }
 }

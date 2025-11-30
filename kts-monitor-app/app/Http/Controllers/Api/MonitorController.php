@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Monitor;
 use App\Models\MonitorLog;
+use App\Console\Commands\CheckSitesLight;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Request;
@@ -89,7 +90,7 @@ class MonitorController extends Controller
         return response()->json(['message' => 'Site deleted']);
     }
 
-    // POST /api/sites/check-all
+    // POST /api/sites/check-all (deep, always runs - ignore interval)
     public function checkAll()
     {
         Artisan::call('sites:check', ['--force' => true]);
@@ -99,6 +100,17 @@ class MonitorController extends Controller
             'data' => Monitor::orderBy('name')->get(),
         ]);
     }
+
+	// POST /api/sites/check-all-light (light, always runs - ignore interval)
+	public function checkAllLight()
+	{
+		Artisan::call('sites:check-light', ['--force' => true]);
+
+		return response()->json([
+			'message' => 'All sites light-checked',
+			'data' => Monitor::orderBy('name')->get(),
+		]);
+	}
 
     // POST /api/sites/{id}/check
     public function checkOne(int $id)
@@ -217,6 +229,58 @@ class MonitorController extends Controller
 
         return response()->json([
             'message' => 'Site refreshed',
+            'data' => $monitor,
+        ]);
+    }
+
+    // POST /api/sites/{id}/check-light
+    public function checkOneLight(int $id)
+    {
+        $monitor = Monitor::findOrFail($id);
+
+        $statusCode = 0;
+        $responseTime = null;
+        $error = null;
+
+        try {
+            $start = microtime(true);
+            $response = Http::timeout(5)
+                ->withHeaders(['User-Agent' => CheckSitesLight::USER_AGENT])
+                ->head($monitor->url);
+
+            $statusCode = $response->status();
+
+            if ($statusCode === 405) {
+                $response = Http::timeout(5)
+                    ->withHeaders(['User-Agent' => CheckSitesLight::USER_AGENT])
+                    ->get($monitor->url);
+                $statusCode = $response->status();
+            }
+        } catch (\Exception $e) {
+            $error = $e->getMessage();
+        }
+
+        $end = microtime(true);
+        $responseTime = (int) round(($end - $start) * 1000);
+
+        MonitorLog::create([
+            'monitor_id' => $monitor->id,
+            'status_code' => $statusCode,
+            'response_time_ms' => $responseTime,
+            'error_message' => $error,
+            'checked_at' => now(),
+        ]);
+
+        $monitor->update([
+            'last_status' => $statusCode,
+            'last_response_time_ms' => $responseTime,
+            'last_checked_at' => now(),
+        ]);
+
+        $monitor->refresh();
+
+        return response()->json([
+            'message' => 'Site light-checked',
             'data' => $monitor,
         ]);
     }

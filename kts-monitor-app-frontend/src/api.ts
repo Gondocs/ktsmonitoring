@@ -88,6 +88,18 @@ export async function checkOneSite(id: number) {
 	});
 }
 
+export async function checkAllSitesLight() {
+	return apiFetch('/sites/check-all-light', {
+		method: 'POST',
+	});
+}
+
+export async function checkOneSiteLight(id: number) {
+	return apiFetch(`/sites/${id}/check-light`, {
+		method: 'POST',
+	});
+}
+
 export async function fetchSiteLogs(id: number, limit = 50) {
 	return apiFetch(`/sites/${id}/logs?limit=${limit}`);
 }
@@ -100,5 +112,16 @@ export async function setMonitorInterval(minutes: number) {
 	return apiFetch('/settings/monitor-interval', {
 		method: 'POST',
 		body: JSON.stringify({ interval_minutes: minutes }),
+	});
+}
+
+export async function getLightMonitorInterval(): Promise<{ interval_minutes: number }> {
+	return apiFetch('/settings/monitor-interval-light');
+}
+
+export async function setLightMonitorInterval(interval_minutes: number) {
+	return apiFetch('/settings/monitor-interval-light', {
+		method: 'POST',
+		body: JSON.stringify({ interval_minutes }),
 	});
 }

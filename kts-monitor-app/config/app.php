@@ -123,7 +123,13 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
-    // Monitor check default interval in minutes (6 hours)
+    // Deep monitor check default interval in minutes (6 hours)
     'monitor_interval_minutes' => env('MONITOR_INTERVAL_MINUTES', 360),
+
+    // Light (heartbeat) monitor check default interval in minutes (15 minutes)
+    'monitor_interval_light_minutes' => env('MONITOR_INTERVAL_LIGHT_MINUTES', 15),
+
+    // Maximum number of light checks per automatic scheduler run
+    'monitor_light_batch_size' => env('MONITOR_LIGHT_BATCH_SIZE', 15),
 
 ];

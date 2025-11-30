@@ -249,10 +249,24 @@ class SwaggerController extends Controller
                 '/sites/check-all' => [
                     'post' => [
                         'tags' => ['Sites'],
-                        'summary' => 'Check all sites now',
+                        'summary' => 'Deep check all sites now (Mélyelemzés)',
                         'responses' => [
                             '200' => [
-                                'description' => 'All sites refreshed',
+                                'description' => 'All sites deep-checked and refreshed',
+                            ],
+                            '401' => [
+                                'description' => 'Unauthorized',
+                            ],
+                        ],
+                    ],
+                ],
+                '/sites/check-all-light' => [
+                    'post' => [
+                        'tags' => ['Sites'],
+                        'summary' => 'Light heartbeat check for all sites (Szívverés)',
+                        'responses' => [
+                            '200' => [
+                                'description' => 'All sites light-checked (heartbeat)',
                             ],
                             '401' => [
                                 'description' => 'Unauthorized',
@@ -277,6 +291,33 @@ class SwaggerController extends Controller
                         'responses' => [
                             '200' => [
                                 'description' => 'Site refreshed',
+                            ],
+                            '401' => [
+                                'description' => 'Unauthorized',
+                            ],
+                            '404' => [
+                                'description' => 'Not found',
+                            ],
+                        ],
+                    ],
+                ],
+                '/sites/{id}/check-light' => [
+                    'post' => [
+                        'tags' => ['Sites'],
+                        'summary' => 'Light heartbeat check for a single site (Szívverés)',
+                        'parameters' => [
+                            [
+                                'name' => 'id',
+                                'in' => 'path',
+                                'required' => true,
+                                'schema' => [
+                                    'type' => 'integer',
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Site light-checked (heartbeat)',
                             ],
                             '401' => [
                                 'description' => 'Unauthorized',
@@ -327,6 +368,54 @@ class SwaggerController extends Controller
                         'responses' => [
                             '200' => [
                                 'description' => 'Interval updated',
+                            ],
+                            '400' => [
+                                'description' => 'Validation error',
+                            ],
+                            '401' => [
+                                'description' => 'Unauthorized',
+                            ],
+                        ],
+                    ],
+                ],
+                '/settings/monitor-interval-light' => [
+                    'get' => [
+                        'tags' => ['Settings'],
+                        'summary' => 'Get current light monitor check interval (minutes)',
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Current light interval returned',
+                            ],
+                            '401' => [
+                                'description' => 'Unauthorized',
+                            ],
+                        ],
+                    ],
+                    'post' => [
+                        'tags' => ['Settings'],
+                        'summary' => 'Set light monitor check interval (minutes)',
+                        'requestBody' => [
+                            'required' => true,
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['interval_minutes'],
+                                        'properties' => [
+                                            'interval_minutes' => [
+                                                'type' => 'integer',
+                                                'minimum' => 1,
+                                                'maximum' => 10080,
+                                                'description' => 'Light interval in minutes (1-10080)',
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'responses' => [
+                            '200' => [
+                                'description' => 'Light interval updated',
                             ],
                             '400' => [
                                 'description' => 'Validation error',

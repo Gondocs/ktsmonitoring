@@ -21,7 +21,9 @@ Route::middleware('auth:sanctum')->group(function () {
 	Route::patch('/sites/{id}', [MonitorController::class, 'update']);
 	Route::delete('/sites/{id}', [MonitorController::class, 'destroy']);
 	Route::post('/sites/check-all', [MonitorController::class, 'checkAll']);
+	Route::post('/sites/check-all-light', [MonitorController::class, 'checkAllLight']);
 	Route::post('/sites/{id}/check', [MonitorController::class, 'checkOne']);
+	Route::post('/sites/{id}/check-light', [MonitorController::class, 'checkOneLight']);
 
 	// Legacy monitors endpoints (optional)
 	Route::get('/monitors', [MonitorController::class, 'index']);
@@ -33,4 +35,6 @@ Route::middleware('auth:sanctum')->group(function () {
 	// Settings
 	Route::get('/settings/monitor-interval', [SettingsController::class, 'getMonitorInterval']);
 	Route::post('/settings/monitor-interval', [SettingsController::class, 'setMonitorInterval']);
+	Route::get('/settings/monitor-interval-light', [SettingsController::class, 'getLightMonitorInterval']);
+	Route::post('/settings/monitor-interval-light', [SettingsController::class, 'setLightMonitorInterval']);
 });

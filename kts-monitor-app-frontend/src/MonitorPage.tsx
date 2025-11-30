@@ -11,11 +11,15 @@ import {
   fetchSites,
   checkAllSites,
   checkOneSite,
+  checkAllSitesLight,
+  checkOneSiteLight,
   createSite,
   deleteSite,
   fetchSiteLogs,
   getMonitorInterval,
   setMonitorInterval,
+  getLightMonitorInterval,
+  setLightMonitorInterval,
   updateSite,
 } from "./api.ts";
 import { useAuth } from "./auth.tsx";
@@ -52,7 +56,9 @@ export const MonitorPage: React.FC = () => {
   const [sites, setSites] = useState<Monitor[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingLight, setRefreshingLight] = useState(false);
   const [refreshingIds, setRefreshingIds] = useState<number[]>([]);
+  const [refreshingLightIds, setRefreshingLightIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [newUrl, setNewUrl] = useState("");
@@ -72,6 +78,10 @@ export const MonitorPage: React.FC = () => {
   );
   const [intervalLoading, setIntervalLoading] = useState(false);
   const [intervalSaving, setIntervalSaving] = useState(false);
+  const [lightIntervalMinutes, setLightIntervalMinutes] = useState<number | null>(
+    null
+  );
+  const [lightIntervalSaving, setLightIntervalSaving] = useState(false);
 
   const [editMonitor, setEditMonitor] = useState<Monitor | null>(null);
   const [editUrl, setEditUrl] = useState("");
@@ -108,6 +118,21 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
+  const handleRefreshAllLight = async () => {
+    setRefreshingLight(true);
+    try {
+      await checkAllSitesLight();
+      await loadSites();
+    } catch (err: any) {
+      alert(
+        err.message ||
+          "Nem sikerült light ellenőrzést futtatni az összes weboldalra."
+      );
+    } finally {
+      setRefreshingLight(false);
+    }
+  };
+
   const handleRefreshOne = async (id: number) => {
     setRefreshingIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     try {
@@ -117,6 +142,23 @@ export const MonitorPage: React.FC = () => {
       alert(err.message || "Nem sikerült frissíteni a weboldalt.");
     } finally {
       setRefreshingIds((prev) => prev.filter((x) => x !== id));
+    }
+  };
+
+  const handleRefreshOneLight = async (id: number) => {
+    setRefreshingLightIds((prev) =>
+      prev.includes(id) ? prev : [...prev, id]
+    );
+    try {
+      await checkOneSiteLight(id);
+      await loadSites();
+    } catch (err: any) {
+      alert(
+        err.message ||
+          "Nem sikerült light ellenőrzést futtatni a weboldalra."
+      );
+    } finally {
+      setRefreshingLightIds((prev) => prev.filter((x) => x !== id));
     }
   };
 
@@ -204,6 +246,7 @@ export const MonitorPage: React.FC = () => {
   };
 
   const isRowRefreshing = (id: number) => refreshingIds.includes(id);
+  const isRowRefreshingLight = (id: number) => refreshingLightIds.includes(id);
 
   const openSettings = async () => {
     setSettingsOpen(true);
@@ -211,6 +254,8 @@ export const MonitorPage: React.FC = () => {
     try {
       const data = await getMonitorInterval();
       setIntervalMinutesState(data.interval_minutes ?? null);
+      const light = await getLightMonitorInterval();
+      setLightIntervalMinutes(light.interval_minutes ?? null);
     } catch (err: any) {
       alert(err.message || "Nem sikerült betölteni a beállításokat.");
     } finally {
@@ -229,6 +274,20 @@ export const MonitorPage: React.FC = () => {
       alert(err.message || "Nem sikerült menteni az intervallumot.");
     } finally {
       setIntervalSaving(false);
+    }
+  };
+
+  const saveLightInterval = async () => {
+    if (lightIntervalMinutes == null || Number.isNaN(lightIntervalMinutes)) return;
+    setLightIntervalSaving(true);
+    try {
+      const data = await setLightMonitorInterval(lightIntervalMinutes);
+      setLightIntervalMinutes(data.interval_minutes ?? lightIntervalMinutes);
+      alert("Light intervallum sikeresen frissítve.");
+    } catch (err: any) {
+      alert(err.message || "Nem sikerült menteni a light intervallumot.");
+    } finally {
+      setLightIntervalSaving(false);
     }
   };
 
@@ -389,16 +448,30 @@ export const MonitorPage: React.FC = () => {
               Állapot, válaszidő, SSL lejárat és stabilitás egy helyen.
             </p>
           </div>
-          <button
-            onClick={handleRefreshAll}
-            disabled={refreshing || loading}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white shadow-md shadow-ktsRed/30 transition"
-          >
-            {refreshing && (
-              <span className="h-4 w-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            )}
-            {refreshing ? "Összes frissítése…" : "Összes weboldal frissítése"}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={handleRefreshAll}
+              disabled={refreshing || loading}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white shadow-md shadow-ktsRed/30 transition"
+            >
+              {refreshing && (
+                <span className="h-4 w-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              )}
+              {refreshing ? "Összes deep ellenőrzése…" : "Összes deep ellenőrzés"}
+            </button>
+            <button
+              onClick={handleRefreshAllLight}
+              disabled={refreshingLight || loading}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-800 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-slate-100 border border-slate-600 transition"
+            >
+              {refreshingLight && (
+                <span className="h-4 w-4 border-2 border-slate-300/60 border-t-white rounded-full animate-spin" />
+              )}
+              {refreshingLight
+                ? "Összes light ellenőrzése…"
+                : "Összes light ellenőrzés"}
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -567,7 +640,11 @@ export const MonitorPage: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
                   {activeSites.map((m) => {
-                    const rowRefreshing = isRowRefreshing(m.id) || refreshing;
+                    const rowRefreshing =
+                      isRowRefreshing(m.id) ||
+                      isRowRefreshingLight(m.id) ||
+                      refreshing ||
+                      refreshingLight;
                     return (
                       <tr
                         key={m.id}
@@ -639,10 +716,18 @@ export const MonitorPage: React.FC = () => {
                             <button
                               onClick={() => handleRefreshOne(m.id)}
                               disabled={rowRefreshing}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                              title="Frissítés"
+                              className="inline-flex items-center justify-center h-8 px-3 rounded-full bg-ktsRed hover:bg-ktsLightRed text-white border border-ktsRed disabled:opacity-60 disabled:cursor-not-allowed transition text-[10px]"
+                              title="Mély (deep) ellenőrzés"
                             >
-                              <FiRefreshCw className="h-4 w-4" />
+                              Deep
+                            </button>
+                            <button
+                              onClick={() => handleRefreshOneLight(m.id)}
+                              disabled={rowRefreshing}
+                              className="inline-flex items-center justify-center h-8 px-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition text-[10px]"
+                              title="Light ellenőrzés"
+                            >
+                              Light
                             </button>
                             <button
                               onClick={() => openLogsModal(m)}
@@ -886,9 +971,9 @@ export const MonitorPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="space-y-2 text-sm text-slate-200">
+            <div className="space-y-4 text-sm text-slate-200">
               <label className="flex flex-col gap-1">
-                <span>Intervallum percekben</span>
+                <span>Mély (deep) ellenőrzés intervalluma percekben</span>
                 <input
                   type="number"
                   min={1}
@@ -902,32 +987,71 @@ export const MonitorPage: React.FC = () => {
                   className="mt-0.5 w-32 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-ktsRed"
                 />
                 <span className="text-xs text-slate-400">
-                  6 óra = 360 perc, 5 perc = 5 perc stb.
+                  Ritka, részletes ellenőrzés (SSL, WordPress, stabilitás, stb.).
+                </span>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span>Light (heartbeat) ellenőrzés intervalluma percekben</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10080}
+                  value={lightIntervalMinutes ?? ""}
+                  onChange={(e) =>
+                    setLightIntervalMinutes(
+                      e.target.value ? Number(e.target.value) : null
+                    )
+                  }
+                  className="mt-0.5 w-32 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-ktsRed"
+                />
+                <span className="text-xs text-slate-400">
+                  Gyakoribb, gyors heartbeat ellenőrzés (csak státusz és válaszidő).
                 </span>
               </label>
             </div>
 
-            <div className="flex items-center justify-between gap-3 pt-2">
+            <div className="flex flex-col gap-3 pt-2 text-xs text-slate-400">
               {intervalLoading ? (
-                <p className="text-xs text-slate-400 flex items-center gap-2">
+                <p className="flex items-center gap-2">
                   <span className="h-3 w-3 border-2 border-slate-600 border-t-ktsRed rounded-full animate-spin" />
-                  <span>Intervallum betöltése…</span>
+                  <span>Intervallumok betöltése…</span>
                 </p>
               ) : (
-                <p className="text-xs text-slate-400">
-                  Aktuális érték:{" "}
-                  {intervalMinutes != null ? `${intervalMinutes} perc` : "—"}
-                </p>
+                <>
+                  <p>
+                    Deep aktuális érték:{" "}
+                    {intervalMinutes != null ? `${intervalMinutes} perc` : "—"}
+                  </p>
+                  <p>
+                    Light aktuális érték:{" "}
+                    {lightIntervalMinutes != null
+                      ? `${lightIntervalMinutes} perc`
+                      : "—"}
+                  </p>
+                </>
               )}
-              <button
-                onClick={saveInterval}
-                disabled={
-                  intervalSaving || intervalLoading || intervalMinutes == null
-                }
-                className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
-              >
-                {intervalSaving ? "Mentés…" : "Mentés"}
-              </button>
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={saveInterval}
+                  disabled={
+                    intervalSaving || intervalLoading || intervalMinutes == null
+                  }
+                  className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
+                >
+                  {intervalSaving ? "Deep mentése…" : "Deep mentése"}
+                </button>
+                <button
+                  onClick={saveLightInterval}
+                  disabled={
+                    lightIntervalSaving || intervalLoading || lightIntervalMinutes == null
+                  }
+                  className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
+                >
+                  {lightIntervalSaving ? "Light mentése…" : "Light mentése"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
