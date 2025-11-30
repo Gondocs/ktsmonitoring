@@ -195,12 +195,17 @@ class MonitorController extends Controller
                 'error_message' => $attemptError,
                 'checked_at' => now(),
             ]);
+
+            if ($attemptStatus !== null && $attemptStatus >= 200 && $attemptStatus < 400) {
+                break;
+            }
         }
 
         $avgStatus = empty($statusCodes) ? 0 : (int) round(array_sum($statusCodes) / count($statusCodes));
         $avgResponseTime = empty($responseTimes) ? null : (int) round(array_sum($responseTimes) / count($responseTimes));
 
-        $stabilityScore = (int) round(($successCount / $attempts) * 100);
+        $effectiveAttempts = max(1, count($statusCodes));
+        $stabilityScore = (int) round(($successCount / $effectiveAttempts) * 100);
 
         if (str_starts_with($monitor->url, 'https://')) {
             $checker = new \App\Console\Commands\CheckSites();

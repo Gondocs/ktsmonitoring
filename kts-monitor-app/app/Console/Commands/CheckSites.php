@@ -39,7 +39,6 @@ class CheckSites extends Command
             $successCount = 0;
             $statusCodes = [];
             $responseTimes = [];
-            $attemptsDone = 0;
 
             $sslDaysRemaining = null;
             $sslExpiresAt = null;
@@ -50,8 +49,6 @@ class CheckSites extends Command
             $contentLastModifiedAt = null;
 
             for ($i = 0; $i < $maxAttempts; $i++) {
-                $attemptsDone++;
-
                 $attemptStatus = null;
                 $attemptResponseTime = null;
                 $attemptError = null;
@@ -72,8 +69,10 @@ class CheckSites extends Command
                     $statusCodes[] = $attemptStatus;
                     $responseTimes[] = $attemptResponseTime;
 
-                    // Sikernek csak a 200-at tekintjük
-                    if ($attemptStatus === 200) {
+                    // Siker: bármely 2xx–3xx
+                    $isSuccess = $attemptStatus >= 200 && $attemptStatus < 400;
+
+                    if ($isSuccess) {
                         $successCount++;
 
                         // Lassabb metaadatok az első sikeres próbálkozáskor
@@ -110,17 +109,20 @@ class CheckSites extends Command
                                 }
                             }
                         }
-                    } else {
-                        // Ha nem 200, de még az első próbálkozás, akkor is gyűjtsünk alap metaadatokat
-                        if ($i === 0 && $successCount === 0) {
-                            $redirectHistory = $response->header('X-Guzzle-Redirect-History');
-                            if ($redirectHistory !== null) {
-                                $redirectUrls = array_filter(explode(', ', $redirectHistory));
-                                $redirectCount = count($redirectUrls);
-                            }
 
-                            $hasHsts = $response->hasHeader('Strict-Transport-Security');
+                        // Ha sikeres (2xx–3xx), nem próbálkozunk tovább
+                        break;
+                    }
+
+                    // Ha nem sikeres, de az első próbálkozás, itt is gyűjthetsz metaadatokat, ha akarsz
+                    if ($i === 0 && $successCount === 0) {
+                        $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+                        if ($redirectHistory !== null) {
+                            $redirectUrls = array_filter(explode(', ', $redirectHistory));
+                            $redirectCount = count($redirectUrls);
                         }
+
+                        $hasHsts = $response->hasHeader('Strict-Transport-Security');
                     }
                 } catch (\Exception $e) {
                     $attemptError = $e->getMessage();
@@ -134,21 +136,15 @@ class CheckSites extends Command
                     'error_message' => $attemptError,
                     'checked_at' => now(),
                 ]);
-
-                // Ha sikeres (200), nem próbálkozunk tovább
-                if ($attemptStatus === 200) {
-                    break;
-                }
             }
 
             $avgStatus = empty($statusCodes) ? 0 : (int) round(array_sum($statusCodes) / count($statusCodes));
             $avgResponseTime = empty($responseTimes) ? null : (int) round(array_sum($responseTimes) / count($responseTimes));
 
-            // Stabilitási score (0-100) az elvégzett próbálkozások alapján
-            $attemptsForScore = max(1, $attemptsDone);
-            $stabilityScore = (int) round(($successCount / $attemptsForScore) * 100);
+            // Fontos: a ténylegesen lefutott próbálkozások számát használjuk
+            $effectiveAttempts = max(1, count($statusCodes));
+            $stabilityScore = (int) round(($successCount / $effectiveAttempts) * 100);
 
-            // Ha HTTPS, próbáljuk kiolvasni a cert lejáratát
             if (str_starts_with($monitor->url, 'https://')) {
                 $sslInfo = $this->getSslInfo($monitor->url);
                 if ($sslInfo !== null) {
@@ -171,6 +167,7 @@ class CheckSites extends Command
                 'last_checked_at' => now(),
             ]);
         }
+
 
         $this->info('Kész.');
     }
