@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useAuth } from "./auth.tsx";
 import { FiMail, FiLock, FiArrowRight, FiLoader } from "react-icons/fi";
+import Aurora from "./Aurora.tsx"; // Adjust path if necessary
 
 type Props = {
   onLoggedIn: () => void;
@@ -29,9 +30,16 @@ export const LoginPage: React.FC<Props> = ({ onLoggedIn }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 relative overflow-hidden px-4">
-      {/* Háttér dekoráció */}
-      <div className="absolute top-0 left-1/4 w-96 h-96 bg-ktsBlue/10 rounded-full blur-[100px] pointer-events-none" />
-      <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-ktsRed/5 rounded-full blur-[100px] pointer-events-none" />
+      
+      {/* Aurora Background */}
+      <div className="absolute inset-0 z-0">
+        <Aurora
+          colorStops={["#3A29FF", "#FF94B4", "#FF3232"]}
+          blend={0.5}
+          amplitude={1.0}
+          speed={0.5}
+        />
+      </div>
 
       <div className="w-full max-w-md relative z-10">
         <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl shadow-2xl p-8 sm:p-10 space-y-8">

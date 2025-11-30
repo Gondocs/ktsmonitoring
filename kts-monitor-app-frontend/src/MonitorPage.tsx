@@ -528,9 +528,7 @@ export const MonitorPage: React.FC = () => {
               <button
                 onClick={() => {
                   setIsSorting(true);
-                  setSortDirection(
-                    sortDirection === "asc" ? "desc" : "asc"
-                  );
+                  setSortDirection(sortDirection === "asc" ? "desc" : "asc");
                   setTimeout(() => setIsSorting(false), 250);
                 }}
                 className="px-3 py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg border border-slate-800 hover:border-slate-700 transition flex items-center justify-center min-w-[40px]"
@@ -746,18 +744,22 @@ export const MonitorPage: React.FC = () => {
                             {/* Utolsó ellenőrzés */}
                             <td className="px-4 py-4 text-right text-[11px] text-slate-500">
                               {m.last_checked_at
-                                ? new Date(
-                                    m.last_checked_at
-                                  ).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })
-                                : "—"}
+                                ? (() => {
+                                    const d = new Date(m.last_checked_at);
+                                    d.setHours(d.getHours() + 1);
+                                    return d.toLocaleTimeString([], {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    });
+                                  })()
+                                : "-"}
                               <div className="text-[10px] opacity-60">
                                 {m.last_checked_at
-                                  ? new Date(
-                                      m.last_checked_at
-                                    ).toLocaleDateString()
+                                  ? (() => {
+                                      const d = new Date(m.last_checked_at);
+                                      d.setHours(d.getHours() + 1);
+                                      return d.toLocaleDateString("hu-HU");
+                                    })()
                                   : ""}
                               </div>
                             </td>
