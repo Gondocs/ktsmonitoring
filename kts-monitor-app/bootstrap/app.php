@@ -17,10 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (Schedule $schedule) {
         // Light check every minute
-        $schedule->command('sites:check-light --force')->everyMinute();
+        $schedule->command('sites:check-light')->everyMinute();
 
         // Deep check – adjust interval as you like
-        $schedule->command('sites:check')->daily();
+        $schedule->command('sites:check')->dailyAt('04:00');
 
         // Clean old logs daily
         $schedule->command('logs:clean-old')->dailyAt('01:00');
