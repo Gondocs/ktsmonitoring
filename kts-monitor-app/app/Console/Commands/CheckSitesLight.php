@@ -55,13 +55,17 @@ class CheckSitesLight extends Command
                     ->head($monitor->url);
 
                 $statusCode = $response->status();
-
+                
+                // Megpróbálom ez nélkü, hogy futnak-e problémák a HEAD kéréssel
+               /*
                 if ($statusCode === 405) {
                     $response = Http::timeout(5)
                         ->withHeaders(['User-Agent' => self::USER_AGENT])
                         ->get($monitor->url);
                     $statusCode = $response->status();
                 }
+
+                */
 
             } catch (\Exception $e) {
                 $error = $e->getMessage();
