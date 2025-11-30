@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\MonitorLog;
+use App\Models\Monitor;
 use Illuminate\Http\Request;
 
 class MonitorLogController extends Controller
@@ -34,5 +35,20 @@ class MonitorLogController extends Controller
             ]);
 
         return response()->json($logs);
+    }
+
+    public function destroyByMonitor(int $monitorId)
+    {
+        $monitor = Monitor::findOrFail($monitorId);
+        MonitorLog::where('monitor_id', $monitor->id)->delete();
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    public function destroyAll()
+    {
+        MonitorLog::truncate();
+
+        return response()->json(['status' => 'ok']);
     }
 }

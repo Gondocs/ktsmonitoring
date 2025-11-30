@@ -1,5 +1,4 @@
-- CSS javítások
-- Mobil és tablet nézet
+
 - Színek megváltoztatása
 - Szövegek középre igazítása
 - Jelenlegi URL és nevek szerkesztése

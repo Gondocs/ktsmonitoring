@@ -6,6 +6,7 @@ import {
   FiTrash2,
   FiSettings,
   FiEdit2,
+  FiZap,
 } from "react-icons/fi";
 import {
   fetchSites,
@@ -21,6 +22,10 @@ import {
   getLightMonitorInterval,
   setLightMonitorInterval,
   updateSite,
+  deleteSiteLogs,
+  getLogRetentionDays,
+  setLogRetentionDays,
+  deleteAllLogs,
 } from "./api.ts";
 import { useAuth } from "./auth.tsx";
 
@@ -78,16 +83,22 @@ export const MonitorPage: React.FC = () => {
   );
   const [intervalLoading, setIntervalLoading] = useState(false);
   const [intervalSaving, setIntervalSaving] = useState(false);
-  const [lightIntervalMinutes, setLightIntervalMinutes] = useState<number | null>(
-    null
-  );
+  const [lightIntervalMinutes, setLightIntervalMinutes] = useState<
+    number | null
+  >(null);
   const [lightIntervalSaving, setLightIntervalSaving] = useState(false);
+
+  const [logRetentionDays, setLogRetentionDays] = useState<number | null>(15);
+  const [logRetentionSaving, setLogRetentionSaving] = useState(false);
 
   const [editMonitor, setEditMonitor] = useState<Monitor | null>(null);
   const [editUrl, setEditUrl] = useState("");
   const [editName, setEditName] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
   const [editSaving, setEditSaving] = useState(false);
+
+  const [deletingAllLogs, setDeletingAllLogs] = useState(false);
+  const [deletingSiteLogs, setDeletingSiteLogs] = useState(false);
 
   const loadSites = async () => {
     setLoading(true);
@@ -146,16 +157,13 @@ export const MonitorPage: React.FC = () => {
   };
 
   const handleRefreshOneLight = async (id: number) => {
-    setRefreshingLightIds((prev) =>
-      prev.includes(id) ? prev : [...prev, id]
-    );
+    setRefreshingLightIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     try {
       await checkOneSiteLight(id);
       await loadSites();
     } catch (err: any) {
       alert(
-        err.message ||
-          "Nem sikerült light ellenőrzést futtatni a weboldalra."
+        err.message || "Nem sikerült light ellenőrzést futtatni a weboldalra."
       );
     } finally {
       setRefreshingLightIds((prev) => prev.filter((x) => x !== id));
@@ -225,6 +233,26 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
+  const handleDeleteSiteLogs = async () => {
+    if (!logModalMonitor) return;
+    if (
+      !window.confirm(
+        "Biztosan törölni szeretnéd az összes naplóbejegyzést ehhez a weboldalhoz?"
+      )
+    ) {
+      return;
+    }
+    try {
+      setDeletingSiteLogs(true);
+      await deleteSiteLogs(logModalMonitor.id);
+      await reloadLogs();
+    } catch (err: any) {
+      alert(err.message || "Nem sikerült törölni a naplókat.");
+    } finally {
+      setDeletingSiteLogs(false);
+    }
+  };
+
   const statusColor = (m: Monitor) => {
     if (m.last_status === 200) {
       if (m.last_response_time_ms != null && m.last_response_time_ms > 5000) {
@@ -256,6 +284,8 @@ export const MonitorPage: React.FC = () => {
       setIntervalMinutesState(data.interval_minutes ?? null);
       const light = await getLightMonitorInterval();
       setLightIntervalMinutes(light.interval_minutes ?? null);
+      const retention = await getLogRetentionDays();
+      setLogRetentionDays(retention.retention_days ?? 15);
     } catch (err: any) {
       alert(err.message || "Nem sikerült betölteni a beállításokat.");
     } finally {
@@ -278,7 +308,8 @@ export const MonitorPage: React.FC = () => {
   };
 
   const saveLightInterval = async () => {
-    if (lightIntervalMinutes == null || Number.isNaN(lightIntervalMinutes)) return;
+    if (lightIntervalMinutes == null || Number.isNaN(lightIntervalMinutes))
+      return;
     setLightIntervalSaving(true);
     try {
       const data = await setLightMonitorInterval(lightIntervalMinutes);
@@ -288,6 +319,43 @@ export const MonitorPage: React.FC = () => {
       alert(err.message || "Nem sikerült menteni a light intervallumot.");
     } finally {
       setLightIntervalSaving(false);
+    }
+  };
+
+  const saveLogRetention = async () => {
+    if (logRetentionDays == null || Number.isNaN(logRetentionDays)) return;
+    setLogRetentionSaving(true);
+    try {
+      await setLogRetentionDays(logRetentionDays);
+      alert("Napló megőrzési idő sikeresen frissítve.");
+    } catch (err: any) {
+      alert(
+        err.message || "Nem sikerült menteni a napló megőrzési beállítást."
+      );
+    } finally {
+      setLogRetentionSaving(false);
+    }
+  };
+
+  const handleDeleteAllLogs = async () => {
+    if (
+      !window.confirm(
+        "Biztosan törölni szeretnéd az ÖSSZES naplóbejegyzést MINDEN weboldalhoz? Ez a művelet nem vonható vissza."
+      )
+    ) {
+      return;
+    }
+    try {
+      setDeletingAllLogs(true);
+      await deleteAllLogs();
+      if (logModalMonitor) {
+        await reloadLogs();
+      }
+      alert("Minden naplóbejegyzés törölve lett.");
+    } catch (err: any) {
+      alert(err.message || "Nem sikerült törölni az összes naplóbejegyzést.");
+    } finally {
+      setDeletingAllLogs(false);
     }
   };
 
@@ -413,205 +481,482 @@ export const MonitorPage: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3 mt-2 text-xs text-slate-300">
-            <label>Rendezés:</label>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1"
-            >
-              <option value="name">Név (A-Z)</option>
-              <option value="response_time">Válaszidő</option>
-              <option value="status">HTTP kód</option>
-              <option value="redirect">Átirányítás</option>
-              <option value="stability">Stabilitás</option>
-              <option value="last_checked">Utolsó ellenőrzés</option>
-            </select>
-
-            <button
-              onClick={() =>
-                setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-              }
-              className="px-2 py-1 rounded bg-slate-800 border border-slate-700"
-            >
-              {sortDirection === "asc" ? "▲" : "▼"}
-            </button>
-          </div>
-
-          <div>
-            <h2 className="text-xl font-semibold text-slate-50 text-center">
+      <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        {/* --- Fejléc és Globális Műveletek --- */}
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
+          {/* Cím és Leírás */}
+          <div className="flex-1 min-w-0">
+            <h2 className="text-2xl font-bold text-slate-50 tracking-tight">
               Monitorozott weboldalak
             </h2>
-            <p className="text-sm text-slate-400 text-center">
-              Állapot, válaszidő, SSL lejárat és stabilitás egy helyen.
+            <p className="mt-1 text-sm text-slate-400">
+              Valós idejű állapot, SSL státusz és teljesítmény mutatók egy
+              helyen.
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <button
-              onClick={handleRefreshAll}
-              disabled={refreshing || loading}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white shadow-md shadow-ktsRed/30 transition"
-            >
-              {refreshing && (
-                <span className="h-4 w-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              )}
-              {refreshing ? "Összes deep ellenőrzése…" : "Összes deep ellenőrzés"}
-            </button>
-            <button
-              onClick={handleRefreshAllLight}
-              disabled={refreshingLight || loading}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-800 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-slate-100 border border-slate-600 transition"
-            >
-              {refreshingLight && (
-                <span className="h-4 w-4 border-2 border-slate-300/60 border-t-white rounded-full animate-spin" />
-              )}
-              {refreshingLight
-                ? "Összes light ellenőrzése…"
-                : "Összes light ellenőrzés"}
-            </button>
+
+          {/* Toolbar Konténer */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-slate-900/80 p-1.5 rounded-xl border border-slate-800 backdrop-blur-sm shadow-sm">
+            {/* Bal oldal: Rendezés */}
+            <div className="flex items-center gap-2 flex-1 sm:flex-none">
+              <div className="relative group flex-1 sm:flex-none">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="w-full sm:w-auto appearance-none bg-slate-950 text-slate-200 text-xs font-medium rounded-lg pl-3 pr-9 py-2 border border-slate-800 focus:ring-1 focus:ring-ktsRed focus:border-ktsRed focus:outline-none cursor-pointer hover:border-slate-700 transition"
+                >
+                  <option value="name">Név (A-Z)</option>
+                  <option value="response_time">Válaszidő</option>
+                  <option value="status">HTTP kód</option>
+                  <option value="redirect">Átirányítás</option>
+                  <option value="stability">Stabilitás</option>
+                  <option value="last_checked">Utolsó ellenőrzés</option>
+                </select>
+                {/* Custom Chevron Icon */}
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500 group-hover:text-slate-300 transition-colors">
+                  <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+                    <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
+                  </svg>
+                </div>
+              </div>
+
+              <button
+                onClick={() =>
+                  setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+                }
+                className="px-3 py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg border border-slate-800 hover:border-slate-700 transition flex items-center justify-center min-w-[40px]"
+                title={sortDirection === "asc" ? "Növekvő" : "Csökkenő"}
+              >
+                <span className="text-[10px] leading-none">
+                  {sortDirection === "asc" ? "▲" : "▼"}
+                </span>
+              </button>
+            </div>
+
+            {/* Elválasztó (csak desktopon) */}
+            <div className="w-px h-6 bg-slate-800 mx-1 hidden sm:block"></div>
+
+            {/* Jobb oldal: Globális Műveletek */}
+            <div className="flex gap-2">
+              <button
+                onClick={handleRefreshAllLight}
+                disabled={refreshingLight || loading}
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg bg-slate-800 hover:bg-slate-700 hover:text-white px-4 py-2 text-xs font-semibold text-slate-300 border border-slate-700/50 transition disabled:opacity-50 disabled:cursor-not-allowed group"
+              >
+                <FiZap
+                  className={`h-3.5 w-3.5 ${
+                    refreshingLight
+                      ? "animate-pulse text-amber-400"
+                      : "group-hover:text-amber-400 transition-colors"
+                  }`}
+                />
+                <span>{refreshingLight ? "Folyamatban..." : "Light Mind"}</span>
+              </button>
+
+              <button
+                onClick={handleRefreshAll}
+                disabled={refreshing || loading}
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg bg-ktsRed hover:bg-ktsLightRed px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-ktsRed/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {refreshing ? (
+                  <span className="h-3.5 w-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <FiRefreshCw className="h-3.5 w-3.5" />
+                )}
+                <span>{refreshing ? "Folyamatban..." : "Deep Mind"}</span>
+              </button>
+            </div>
           </div>
         </div>
 
         {loading ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <ClipLoader color="#073a59" size={70} />
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <ClipLoader color="#ef4444" size={50} />
+            <p className="text-slate-500 text-sm animate-pulse">
+              Adatok betöltése...
+            </p>
           </div>
         ) : error ? (
-          <p className="text-sm text-red-400">{error}</p>
+          <div className="rounded-xl bg-red-950/20 border border-red-900/50 p-4 text-center">
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
         ) : (
           <>
-            {/* Mobile / small-screen card layout for aktív oldalak */}
-            <div className="space-y-3 md:hidden">
+            {/* --- Desktop Table View --- */}
+            <div className="hidden md:block overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="bg-slate-900/80 text-slate-400 font-semibold uppercase tracking-wider">
+                    <tr>
+                      <th className="px-6 py-4">Weboldal</th>
+                      <th className="px-4 py-4 text-center">Állapot</th>
+                      <th className="px-4 py-4 text-right">Válaszidő</th>
+                      <th className="px-4 py-4 text-center">SSL / HSTS</th>
+                      <th className="px-4 py-4 text-center">Rendszer</th>
+                      <th className="px-4 py-4 text-center">Stabilitás</th>
+                      <th className="px-4 py-4 text-right">Utolsó ell.</th>
+                      <th className="px-6 py-4 text-right">Műveletek</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {activeSites.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
+                          Nincs megjeleníthető aktív monitor.
+                        </td>
+                      </tr>
+                    ) : (
+                      activeSites.map((m) => {
+                        const rowRefreshing =
+                          isRowRefreshing(m.id) ||
+                          isRowRefreshingLight(m.id) ||
+                          refreshing ||
+                          refreshingLight;
+                        return (
+                          <tr
+                            key={m.id}
+                            className={`group hover:bg-slate-900/60 transition-colors ${
+                              rowRefreshing
+                                ? "opacity-50 pointer-events-none"
+                                : ""
+                            }`}
+                          >
+                            {/* Név és URL */}
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col">
+                                <span className="text-sm font-semibold text-slate-100">
+                                  {m.name || "Névtelen"}
+                                </span>
+                                <a
+                                  href={m.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[11px] text-slate-500 hover:text-ktsRed transition truncate max-w-[200px]"
+                                >
+                                  {m.url}
+                                </a>
+                              </div>
+                            </td>
+
+                            {/* Status Badge */}
+                            <td className="px-4 py-4 text-center">
+                              <span
+                                className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold border"
+                                style={{
+                                  color: statusColor(m),
+                                  backgroundColor: `${statusColor(m)}15`,
+                                  borderColor: `${statusColor(m)}30`,
+                                }}
+                              >
+                                {m.last_status ?? "—"}
+                              </span>
+                            </td>
+
+                            {/* Válaszidő */}
+                            <td className="px-4 py-4 text-right font-mono text-slate-300">
+                              {m.last_response_time_ms
+                                ? `${m.last_response_time_ms} ms`
+                                : "—"}
+                            </td>
+
+                            {/* SSL & HSTS - JAVÍTVA */}
+                            <td className="px-4 py-4">
+                              <div className="flex flex-col items-center gap-1.5">
+                                <span
+                                  className="font-mono text-[11px]"
+                                  style={{
+                                    color: sslColor(m.ssl_days_remaining),
+                                  }}
+                                >
+                                  {m.ssl_days_remaining != null
+                                    ? `${m.ssl_days_remaining} nap`
+                                    : "—"}
+                                </span>
+
+                                {/* Itt a logika: ha nincs HSTS, csak egy halvány vonal vagy semmi */}
+                                {m.has_hsts ? (
+                                  <span className="text-[9px] uppercase tracking-wider text-emerald-400 bg-emerald-950/40 border border-emerald-900/50 px-1.5 py-0.5 rounded">
+                                    HSTS
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-yellow-400 select-none bg-yellow-950/40 border border-yellow-900/20 px-1.5 py-0.5 rounded opacity-100">
+                                    HSTS
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Rendszer Info */}
+                            <td className="px-4 py-4 text-center text-[11px] text-slate-400">
+                              <div className="flex flex-col gap-0.5">
+                                <span>
+                                  {m.is_wordpress
+                                    ? `WP ${m.wordpress_version || ""}`
+                                    : ""}
+                                </span>
+                                {(m.redirect_count ?? 0) > 0 && (
+                                  <span className="text-slate-500">
+                                    {m.redirect_count} redirect
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Stabilitás */}
+                            <td className="px-4 py-4 text-center">
+                              {m.stability_score != null ? (
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${
+                                        m.stability_score > 90
+                                          ? "bg-green-500"
+                                          : m.stability_score > 70
+                                          ? "bg-yellow-500"
+                                          : "bg-red-500"
+                                      }`}
+                                      style={{ width: `${m.stability_score}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] font-mono text-slate-300">
+                                    {m.stability_score}%
+                                  </span>
+                                </div>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+
+                            {/* Utolsó ellenőrzés */}
+                            <td className="px-4 py-4 text-right text-[11px] text-slate-500">
+                              {m.last_checked_at
+                                ? new Date(
+                                    m.last_checked_at
+                                  ).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : "—"}
+                              <div className="text-[10px] opacity-60">
+                                {m.last_checked_at
+                                  ? new Date(
+                                      m.last_checked_at
+                                    ).toLocaleDateString()
+                                  : ""}
+                              </div>
+                            </td>
+
+                            {/* Műveletek - ÚJ DESIGN */}
+                            <td className="px-6 py-4">
+                              <div className="flex items-center justify-end gap-3 opacity-90 group-hover:opacity-100 transition">
+                                {/* Ellenőrzés Csoport (Light / Deep) */}
+                                <div className="flex items-center rounded-lg border border-slate-700 bg-slate-900 overflow-hidden shadow-sm">
+                                  <button
+                                    onClick={() => handleRefreshOneLight(m.id)}
+                                    disabled={rowRefreshing}
+                                    className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition disabled:opacity-50"
+                                    title="Gyors (Light) ellenőrzés"
+                                  >
+                                    {/* Itt FiZap van az L helyett */}
+                                    <FiZap className="h-4 w-4" />
+                                  </button>
+                                  <div className="w-px h-4 bg-slate-800"></div>
+                                  <button
+                                    onClick={() => handleRefreshOne(m.id)}
+                                    disabled={rowRefreshing}
+                                    className="p-2 text-slate-400 hover:text-ktsRed hover:bg-slate-800 transition disabled:opacity-50"
+                                    title="Teljes (Deep) ellenőrzés"
+                                  >
+                                    <FiRefreshCw className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+
+                                {/* Adminisztrációs gombok */}
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => openLogsModal(m)}
+                                    className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded transition"
+                                    title="Naplók"
+                                  >
+                                    <FiFileText className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => startEditMonitor(m)}
+                                    className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded transition"
+                                    title="Szerkesztés"
+                                  >
+                                    <FiEdit2 className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(m.id)}
+                                    className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-slate-800 rounded transition"
+                                    title="Törlés"
+                                  >
+                                    <FiTrash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* --- Mobile Card View --- */}
+            <div className="grid gap-4 md:hidden">
               {activeSites.length === 0 ? (
-                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-400 text-center">
-                  Jelenleg nincs még aktív monitorozott weboldal.
+                <div className="text-center py-8 text-slate-500 bg-slate-900/50 rounded-xl border border-slate-800">
+                  Nincs megjeleníthető adat.
                 </div>
               ) : (
                 activeSites.map((m) => {
-                  const rowRefreshing = isRowRefreshing(m.id) || refreshing;
+                  const rowRefreshing =
+                    isRowRefreshing(m.id) ||
+                    isRowRefreshingLight(m.id) ||
+                    refreshing ||
+                    refreshingLight;
                   return (
                     <div
                       key={m.id}
-                      className={`rounded-xl border border-slate-800 bg-slate-900/70 p-3 shadow-sm flex flex-col gap-2 ${
-                        rowRefreshing ? "opacity-60 pointer-events-none" : ""
+                      className={`relative rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm space-y-4 ${
+                        rowRefreshing ? "opacity-70 pointer-events-none" : ""
                       }`}
                     >
+                      {/* Card Header */}
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p
-                            className="text-sm font-semibold text-slate-50 truncate"
-                            title={m.name}
-                          >
+                        <div className="min-w-0">
+                          <h3 className="font-semibold text-slate-50 truncate">
                             {m.name || m.url}
-                          </p>
-                          <p
-                            className="text-xs text-slate-400 truncate"
-                            title={m.url}
-                          >
+                          </h3>
+                          <p className="text-xs text-slate-500 truncate">
                             {m.url}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => startEditMonitor(m)}
-                            className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
-                            title="Szerkesztés"
+                        <span
+                          className="flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border"
+                          style={{
+                            color: statusColor(m),
+                            backgroundColor: `${statusColor(m)}10`,
+                            borderColor: `${statusColor(m)}20`,
+                          }}
+                        >
+                          HTTP {m.last_status ?? "-"}
+                        </span>
+                      </div>
+
+                      {/* Grid Stats */}
+                      <div className="grid grid-cols-3 gap-2 text-[11px]">
+                        {/* Válaszidő */}
+                        <div className="bg-slate-900/50 p-2 rounded border border-slate-800/50">
+                          <span className="block text-slate-500 mb-0.5">
+                            Válasz
+                          </span>
+                          <span className="font-mono text-slate-200">
+                            {m.last_response_time_ms
+                              ? `${m.last_response_time_ms}ms`
+                              : "-"}
+                          </span>
+                        </div>
+
+                        {/* SSL / HSTS - Javítva */}
+                        <div className="bg-slate-900/50 p-2 rounded border border-slate-800/50 flex flex-col justify-between">
+                          <span className="block text-slate-500 mb-0.5">
+                            SSL
+                          </span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span
+                              style={{ color: sslColor(m.ssl_days_remaining) }}
+                            >
+                              {m.ssl_days_remaining ?? "-"} nap
+                            </span>
+                            {m.has_hsts ? (
+                              <span className="text-[9px] uppercase tracking-wider text-emerald-400 bg-emerald-950/40 border border-emerald-900/50 px-1.5 py-0.5 rounded">
+                                HSTS
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-yellow-400 select-none bg-yellow-950/40 border border-yellow-900/20 px-1.5 py-0.5 rounded opacity-100">
+                                HSTS
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Stabilitás */}
+                        <div className="bg-slate-900/50 p-2 rounded border border-slate-800/50">
+                          <span className="block text-slate-500 mb-0.5">
+                            Stab.
+                          </span>
+                          <span
+                            className={
+                              m.stability_score && m.stability_score > 90
+                                ? "text-green-400"
+                                : "text-yellow-400"
+                            }
                           >
-                            <FiEdit2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleRefreshOne(m.id)}
-                            disabled={rowRefreshing}
-                            className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                            title="Frissítés"
-                          >
-                            <FiRefreshCw className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => openLogsModal(m)}
-                            className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
-                            title="Naplók"
-                          >
-                            <FiFileText className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(m.id)}
-                            className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-red-900/70 hover:bg-red-700 text-red-50 border border-red-700 transition"
-                            title="Törlés"
-                          >
-                            <FiTrash2 className="h-4 w-4" />
-                          </button>
+                            {m.stability_score ? `${m.stability_score}%` : "-"}
+                          </span>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 mt-1">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">HTTP</span>
-                          <span style={{ color: statusColor(m) }}>
-                            {m.last_status ?? "-"}
-                          </span>
+                      {/* Action Footer - ÚJ DESIGN */}
+                      <div className="flex items-center justify-between border-t border-slate-800 pt-3 mt-2">
+                        <div className="text-[10px] text-slate-500">
+                          {m.last_checked_at
+                            ? new Date(m.last_checked_at).toLocaleTimeString(
+                                [],
+                                { hour: "2-digit", minute: "2-digit" }
+                              )
+                            : "-"}
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Válaszidő</span>
-                          <span>
-                            {m.last_response_time_ms != null
-                              ? `${m.last_response_time_ms} ms`
-                              : "-"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">SSL napok</span>
-                          <span
-                            style={{ color: sslColor(m.ssl_days_remaining) }}
-                          >
-                            {m.ssl_days_remaining != null
-                              ? `${m.ssl_days_remaining} nap`
-                              : "-"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">HSTS</span>
-                          <span>{m.has_hsts ? "igen" : "nem"}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Átirányítás</span>
-                          <span>{m.redirect_count ?? "-"}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">WordPress</span>
-                          <span>
-                            {m.is_wordpress
-                              ? m.wordpress_version
-                                ? `WP ${m.wordpress_version}`
-                                : "WordPress"
-                              : "-"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Stabilitás</span>
-                          <span>
-                            {m.stability_score != null
-                              ? `${m.stability_score}%`
-                              : "-"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between col-span-2">
-                          <span className="text-slate-400">
-                            Utolsó ellenőrzés
-                          </span>
-                          <span>
-                            {m.last_checked_at
-                              ? new Date(m.last_checked_at).toLocaleString()
-                              : "-"}
-                          </span>
+
+                        <div className="flex items-center gap-3">
+                          {/* Ellenőrzés Csoport */}
+                          <div className="flex items-center rounded-lg border border-slate-700 bg-slate-900 overflow-hidden shadow-sm">
+                            <button
+                              onClick={() => handleRefreshOneLight(m.id)}
+                              className="p-1.5 px-2.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition"
+                              title="Light"
+                            >
+                              <FiZap className="w-4 h-4" />
+                            </button>
+                            <div className="w-px h-4 bg-slate-800"></div>
+                            <button
+                              onClick={() => handleRefreshOne(m.id)}
+                              className="p-1.5 px-2.5 text-slate-400 hover:text-ktsRed hover:bg-slate-800 transition"
+                              title="Deep"
+                            >
+                              <FiRefreshCw className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Egyéb műveletek */}
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => openLogsModal(m)}
+                              className="p-1.5 text-slate-400 bg-slate-900 rounded border border-slate-800 hover:text-slate-200 transition"
+                            >
+                              <FiFileText className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => startEditMonitor(m)}
+                              className="p-1.5 text-slate-400 bg-slate-900 rounded border border-slate-800 hover:text-slate-200 transition"
+                            >
+                              <FiEdit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(m.id)}
+                              className="p-1.5 text-slate-400 bg-slate-900 rounded border border-slate-800 hover:text-red-500 transition"
+                            >
+                              <FiTrash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -620,326 +965,316 @@ export const MonitorPage: React.FC = () => {
               )}
             </div>
 
-            {/* Desktop / tablet table layout */}
-            <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 shadow-lg">
-              <table className="min-w-full text-[11px] sm:text-xs">
-                <thead className="bg-slate-900/80 text-slate-300 text-[11px] uppercase tracking-wide">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Név</th>
-                    <th className="px-3 py-2 text-left">URL</th>
-                    <th className="px-3 py-2 text-center">HTTP</th>
-                    <th className="px-3 py-2 text-center">Válaszidő (ms)</th>
-                    <th className="px-3 py-2 text-center">SSL napok</th>
-                    <th className="px-3 py-2 text-center">HSTS</th>
-                    <th className="px-3 py-2 text-center">Átirányítás</th>
-                    <th className="px-3 py-2 text-center">WordPress</th>
-                    <th className="px-3 py-2 text-center">Stabilitás</th>
-                    <th className="px-3 py-2 text-center">Utolsó ellenőrzés</th>
-                    <th className="px-3 py-2">Műveletek</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/80">
-                  {activeSites.map((m) => {
-                    const rowRefreshing =
-                      isRowRefreshing(m.id) ||
-                      isRowRefreshingLight(m.id) ||
-                      refreshing ||
-                      refreshingLight;
-                    return (
-                      <tr
-                        key={m.id}
-                        className={
-                          "hover:bg-slate-800/60 transition " +
-                          (rowRefreshing
-                            ? "opacity-60 pointer-events-none"
-                            : "")
-                        }
-                      >
-                        <td className="px-3 py-2 font-medium text-slate-100 flex items-center gap-2">
-                          {rowRefreshing && (
-                            <span className="h-3 w-3 border-2 border-slate-500 border-t-ktsRed rounded-full animate-spin" />
-                          )}
-                          <span>{m.name}</span>
-                        </td>
-                        <td className="px-3 py-2 text-slate-300 break-all ">
-                          {m.url}
-                        </td>
-                        <td
-                          className="px-3 py-2 font-mono text-xs text-center"
-                          style={{ color: statusColor(m) }}
-                        >
-                          {m.last_status ?? "-"}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          {m.last_response_time_ms ?? "-"}
-                        </td>
-                        <td
-                          className="px-3 py-2 font-mono text-xs text-center"
-                          style={{ color: sslColor(m.ssl_days_remaining) }}
-                        >
-                          {m.ssl_days_remaining != null
-                            ? `${m.ssl_days_remaining} nap`
-                            : "-"}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          {m.has_hsts ? "igen" : "nem"}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          {m.redirect_count ?? "-"}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          {m.is_wordpress
-                            ? m.wordpress_version
-                              ? `WordPress ${m.wordpress_version}`
-                              : "WordPress"
-                            : "-"}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          {m.stability_score != null
-                            ? `${m.stability_score}%`
-                            : "-"}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-center">
-                          {m.last_checked_at
-                            ? new Date(m.last_checked_at).toLocaleString()
-                            : "-"}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-nowrap items-center gap-1.5 justify-end min-w-[220px]">
-                            <button
-                              onClick={() => startEditMonitor(m)}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
-                              title="Szerkesztés"
-                            >
-                              <FiEdit2 className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleRefreshOne(m.id)}
-                              disabled={rowRefreshing}
-                              className="inline-flex items-center justify-center h-8 px-3 rounded-full bg-ktsRed hover:bg-ktsLightRed text-white border border-ktsRed disabled:opacity-60 disabled:cursor-not-allowed transition text-[10px]"
-                              title="Mély (deep) ellenőrzés"
-                            >
-                              Deep
-                            </button>
-                            <button
-                              onClick={() => handleRefreshOneLight(m.id)}
-                              disabled={rowRefreshing}
-                              className="inline-flex items-center justify-center h-8 px-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition text-[10px]"
-                              title="Light ellenőrzés"
-                            >
-                              Light
-                            </button>
-                            <button
-                              onClick={() => openLogsModal(m)}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition"
-                              title="Naplók"
-                            >
-                              <FiFileText className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(m.id)}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-red-900/70 hover:bg-red-700 text-red-50 border border-red-700 transition"
-                              title="Törlés"
-                            >
-                              <FiTrash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {activeSites.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={11}
-                        className="px-3 py-6 text-center text-sm text-slate-400"
-                      >
-                        Jelenleg nincs még aktív monitorozott weboldal.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Inaktív weboldalak szekció */}
+            {/* --- Inaktív Weboldalak --- */}
             {inactiveSites.length > 0 && (
-              <section className="mt-6 space-y-2">
-                <h3 className="text-sm font-semibold text-slate-200">
-                  Inaktív weboldalak
+              <div className="mt-8 border-t border-slate-800/50 pt-6">
+                <h3 className="text-sm font-semibold text-slate-400 mb-3 flex items-center gap-2">
+                  Inaktív Weboldalak
+                  <span className="bg-slate-800 text-slate-500 text-[10px] px-1.5 py-0.5 rounded-full">
+                    {inactiveSites.length}
+                  </span>
                 </h3>
-                <p className="text-xs text-slate-400">
-                  Ezek a weboldalak jelenleg nincsenek aktívan monitorozva.
-                </p>
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {inactiveSites.map((m) => (
                     <div
                       key={m.id}
-                      className="rounded-xl border border-slate-800 bg-slate-900/70 p-3 text-xs text-slate-300 flex flex-col gap-2"
+                      className="flex items-center justify-between p-3 rounded-lg border border-slate-800 bg-slate-900/30 opacity-70 hover:opacity-100 transition"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p
-                            className="font-semibold text-slate-100 truncate"
-                            title={m.name || m.url}
-                          >
-                            {m.name || m.url}
-                          </p>
-                          <p className="text-[11px] text-slate-400 break-all">
-                            {m.url}
-                          </p>
-                        </div>
-                        <span className="inline-flex items-center rounded-full bg-slate-800 text-[10px] px-2 py-0.5 text-amber-300 border border-amber-500/50">
-                          Inaktív
-                        </span>
+                      <div className="min-w-0 overflow-hidden">
+                        <p className="text-sm font-medium text-slate-300 truncate">
+                          {m.name || m.url}
+                        </p>
+                        <p className="text-xs text-slate-500 truncate">
+                          {m.url}
+                        </p>
                       </div>
-                      <div className="flex items-center justify-end gap-2 mt-1">
-                        <button
-                          type="button"
-                          onClick={() => startEditMonitor(m)}
-                          className="inline-flex items-center justify-center rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 border border-slate-700 text-[11px]"
-                        >
-                          Szerkesztés
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => startEditMonitor(m)}
+                        className="text-xs text-ktsRed hover:text-ktsLightRed px-2 py-1"
+                      >
+                        Kezelés
+                      </button>
                     </div>
                   ))}
                 </div>
-              </section>
+              </div>
             )}
           </>
         )}
 
-        <section className="mt-6 border border-dashed border-slate-700 rounded-xl bg-slate-900/60 p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-slate-100">
-            Új weboldal monitor hozzáadása
-          </h3>
-          <p className="text-xs text-slate-400">
-            Add meg az URL-t, opcionálisan egy könnyen azonosítható nevet.
-          </p>
-          <form
-            onSubmit={handleAdd}
-            className="flex flex-col sm:flex-row gap-3 flex-wrap"
-          >
-            <input
-              type="text"
-              placeholder="URL"
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              required
-              className="flex-1 min-w-[220px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-ktsRed focus:border-ktsRed transition"
-            />
+        {/* --- Új Hozzáadása Section --- */}
+        <section className="mt-10 rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl relative overflow-hidden group">
+          {/* Decorative background glow */}
+          <div className="absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 bg-ktsRed/5 rounded-full blur-3xl pointer-events-none group-hover:bg-ktsRed/10 transition duration-700"></div>
 
-            <input
-              type="text"
-              placeholder="Opcionális megjelenített név"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="flex-1 min-w-[160px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-ktsRed focus:border-ktsRed transition"
-            />
-            <button
-              type="submit"
-              className="inline-flex items-center justify-center rounded-lg bg-ktsRed hover:bg-ktsLightRed px-4 py-2 text-sm font-semibold text-white shadow-md shadow-ktsRed/30 transition"
+          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-1 text-center md:text-left">
+              <h3 className="text-lg font-semibold text-slate-50">
+                Új monitor hozzáadása
+              </h3>
+              <p className="text-sm text-slate-400">
+                Add meg az URL-t a megfigyelés megkezdéséhez.
+              </p>
+            </div>
+
+            <form
+              onSubmit={handleAdd}
+              className="w-full md:w-auto flex flex-col sm:flex-row gap-2"
             >
-              Hozzáadás
-            </button>
-          </form>
+              <input
+                type="text"
+                placeholder="https://pelda.hu"
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+                required
+                className="w-full sm:w-64 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none transition shadow-inner"
+              />
+              <input
+                type="text"
+                placeholder="Név (opcionális)"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full sm:w-48 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none transition shadow-inner"
+              />
+              <button
+                type="submit"
+                className="w-full sm:w-auto whitespace-nowrap rounded-lg bg-ktsRed hover:bg-ktsLightRed px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-ktsRed/20 transition active:scale-95"
+              >
+                Hozzáadás
+              </button>
+            </form>
+          </div>
         </section>
       </main>
 
       {/* Logs modal */}
       {logModalMonitor && (
         <div
-          className="fixed inset-0 z-30 flex items-center justify-center bg-black/70"
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
           onClick={() => setLogModalMonitor(null)}
         >
           <div
-            className="max-w-4xl w-[94%] max-h-[80vh] overflow-auto rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl p-4 sm:p-6"
+            className="flex flex-col w-full max-w-5xl h-[85vh] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div>
-                <h3 className="text-base sm:text-lg font-semibold text-slate-50">
-                  Naplóbejegyzések: {logModalMonitor.name}
+            {/* --- Fejléc --- */}
+            <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/50 px-6 py-4">
+              <div className="overflow-hidden">
+                <h3 className="text-lg font-semibold text-slate-50 truncate">
+                  Napló: {logModalMonitor.name || "Névtelen monitor"}
                 </h3>
-                <p className="text-xs text-slate-400 break-all">
+                <p className="text-xs text-slate-400 truncate font-mono mt-0.5 opacity-80">
                   {logModalMonitor.url}
                 </p>
               </div>
               <button
                 onClick={() => setLogModalMonitor(null)}
-                className="self-start inline-flex items-center rounded-full bg-slate-800 hover:bg-slate-700 text-xs text-slate-100 px-3 py-1.5 border border-slate-600 transition"
+                className="flex-shrink-0 rounded-full bg-slate-800 p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition ml-4"
               >
-                Bezárás
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
               </button>
             </div>
 
-            <div className="mb-4 flex flex-wrap items-center gap-3 text-xs text-slate-300">
-              <label className="flex items-center gap-2">
-                <span>Megjelenített sorok száma:</span>
-                <input
-                  type="number"
-                  value={logsLimit}
-                  min={10}
-                  max={1000}
-                  onChange={(e) => setLogsLimit(Number(e.target.value) || 10)}
-                  className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-50 focus:outline-none focus:ring-1 focus:ring-ktsRed"
-                />
-              </label>
+            {/* --- Eszköztár --- */}
+            <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-4 border-b border-slate-800 bg-slate-950 px-6 py-3">
+              {/* Bal oldal: Szűrők és Frissítés */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-1.5">
+                  <span className="text-xs text-slate-400">Sorok:</span>
+                  <input
+                    type="number"
+                    value={logsLimit}
+                    min={10}
+                    max={1000}
+                    onChange={(e) => setLogsLimit(Number(e.target.value) || 10)}
+                    className="w-12 bg-transparent text-xs font-semibold text-slate-100 focus:outline-none text-center"
+                  />
+                </div>
+
+                <button
+                  onClick={reloadLogs}
+                  disabled={logsLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 hover:text-white disabled:opacity-50 transition"
+                >
+                  <svg
+                    className={`h-3.5 w-3.5 ${
+                      logsLoading ? "animate-spin" : ""
+                    }`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                  {logsLoading ? "Betöltés..." : "Frissítés"}
+                </button>
+              </div>
+
+              {/* Jobb oldal: Veszélyes művelet */}
               <button
-                onClick={reloadLogs}
-                disabled={logsLoading}
-                className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-3 py-1.5 text-xs font-semibold text-white transition"
+                onClick={handleDeleteSiteLogs}
+                disabled={deletingSiteLogs}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-900/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500 hover:text-white disabled:opacity-50 transition"
               >
-                {logsLoading ? "Betöltés…" : "Naplók újratöltése"}
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+                {deletingSiteLogs ? "Törlés folyamatban..." : "Napló ürítése"}
               </button>
             </div>
 
-            {logsLoading ? (
-              <p className="text-sm text-slate-300">Betöltés…</p>
-            ) : logs.length === 0 ? (
-              <p className="text-sm text-slate-300">
-                Még nincsenek naplóbejegyzések.
-              </p>
-            ) : (
-              <div className="overflow-x-auto border border-slate-800 rounded-xl bg-slate-900/70">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-slate-900/90 text-slate-300 uppercase tracking-wide text-[11px]">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Időpont</th>
-                      <th className="px-3 py-2">HTTP</th>
-                      <th className="px-3 py-2">Válaszidő (ms)</th>
-                      <th className="px-3 py-2 text-left">Hibaüzenet</th>
+            {/* --- Táblázat Tartalom --- */}
+            <div className="flex-1 overflow-auto bg-slate-950 relative">
+              {logsLoading && logs.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center text-slate-400 gap-2">
+                  <span className="h-8 w-8 border-2 border-slate-700 border-t-ktsRed rounded-full animate-spin" />
+                  <span className="text-sm">Naplók betöltése...</span>
+                </div>
+              ) : logs.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center text-slate-500 gap-2">
+                  <svg
+                    className="h-10 w-10 opacity-20"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                  <p className="text-sm">Nincsenek elérhető bejegyzések.</p>
+                </div>
+              ) : (
+                <table className="min-w-full text-left text-xs">
+                  <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur shadow-sm">
+                    <tr className="text-slate-400">
+                      <th className="px-6 py-3 font-medium uppercase tracking-wider w-40">
+                        Időpont
+                      </th>
+                      <th className="px-6 py-3 font-medium uppercase tracking-wider w-24 text-center">
+                        Státusz
+                      </th>
+                      <th className="px-6 py-3 font-medium uppercase tracking-wider w-32 text-right">
+                        Válaszidő
+                      </th>
+                      <th className="px-6 py-3 font-medium uppercase tracking-wider">
+                        Hibaüzenet / Részletek
+                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/80">
-                    {logs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-800/60">
-                        <td className="px-3 py-1.5 whitespace-nowrap">
-                          {new Date(
-                            log.checked_at || log.created_at
-                          ).toLocaleString()}
-                        </td>
-                        <td className="px-3 py-1.5 text-center">
-                          {log.status_code ?? "-"}
-                        </td>
-                        <td className="px-3 py-1.5 text-center">
-                          {log.response_time_ms ?? "-"}
-                        </td>
-                        <td
-                          className="px-3 py-1.5 text-left text-xs"
-                          style={{
-                            color: log.error_message ? "#f87171" : undefined,
-                          }}
+                  <tbody className="divide-y divide-slate-800/50 text-slate-300">
+                    {logs.map((log) => {
+                      const isError =
+                        !log.status_code || log.status_code >= 400;
+                      const statusColor = isError
+                        ? "bg-red-500/10 text-red-400 border-red-500/20"
+                        : "bg-green-500/10 text-green-400 border-green-500/20";
+
+                      return (
+                        <tr
+                          key={log.id}
+                          className="group hover:bg-slate-900/40 transition-colors"
                         >
-                          {log.error_message ?? ""}
-                        </td>
-                      </tr>
-                    ))}
+                          <td className="px-6 py-3 whitespace-nowrap text-slate-400 font-mono text-[11px]">
+                            {new Date(
+                              log.checked_at || log.created_at
+                            ).toLocaleString("hu-HU", {
+                              month: "short",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            })}
+                          </td>
+                          <td className="px-6 py-3 text-center">
+                            <span
+                              className={`inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-[10px] font-bold font-mono ${statusColor}`}
+                            >
+                              {log.status_code ?? "ERR"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 text-right font-mono text-slate-400">
+                            {log.response_time_ms ? (
+                              <>
+                                <span
+                                  className={
+                                    log.response_time_ms > 1000
+                                      ? "text-orange-400"
+                                      : "text-slate-200"
+                                  }
+                                >
+                                  {log.response_time_ms}
+                                </span>
+                                <span className="text-slate-600 ml-0.5">
+                                  ms
+                                </span>
+                              </>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-6 py-3 break-all">
+                            {log.error_message ? (
+                              <span className="text-red-400 font-medium flex items-center gap-1.5">
+                                <svg
+                                  className="h-3 w-3 flex-shrink-0"
+                                  fill="currentColor"
+                                  viewBox="0 0 20 20"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                                {log.error_message}
+                              </span>
+                            ) : (
+                              <span className="text-slate-600 italic">OK</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* Opcionális: Lábléc info (pl. összes találat) */}
+            <div className="border-t border-slate-800 bg-slate-900/30 px-6 py-2 text-[10px] text-slate-500 text-right">
+              Megjelenítve: {logs.length} bejegyzés
+            </div>
           </div>
         </div>
       )}
@@ -947,192 +1282,320 @@ export const MonitorPage: React.FC = () => {
       {/* Settings modal */}
       {settingsOpen && (
         <div
-          className="fixed inset-0 z-30 flex items-center justify-center bg-black/70"
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
           onClick={() => setSettingsOpen(false)}
         >
           <div
-            className="max-w-md w-[94%] rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl p-5 space-y-4"
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between gap-3">
+            {/* --- Fejléc --- */}
+            <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/50 px-6 py-4">
               <div>
-                <h3 className="text-base sm:text-lg font-semibold text-slate-50">
+                <h3 className="text-lg font-semibold text-slate-50">
                   Beállítások
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Monitor ellenőrzési intervallum módosítása (percben).
+                  Monitorozás és adatkezelés konfigurálása.
                 </p>
               </div>
               <button
                 onClick={() => setSettingsOpen(false)}
-                className="inline-flex items-center rounded-full bg-slate-800 hover:bg-slate-700 text-xs text-slate-100 px-3 py-1.5 border border-slate-600 transition"
+                className="rounded-full bg-slate-800 p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition"
               >
-                Bezárás
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
               </button>
             </div>
 
-            <div className="space-y-4 text-sm text-slate-200">
-              <label className="flex flex-col gap-1">
-                <span>Mély (deep) ellenőrzés intervalluma percekben</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={10080}
-                  value={intervalMinutes ?? ""}
-                  onChange={(e) =>
-                    setIntervalMinutesState(
-                      e.target.value ? Number(e.target.value) : null
-                    )
-                  }
-                  className="mt-0.5 w-32 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-ktsRed"
-                />
-                <span className="text-xs text-slate-400">
-                  Ritka, részletes ellenőrzés (SSL, WordPress, stabilitás, stb.).
-                </span>
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span>Light (heartbeat) ellenőrzés intervalluma percekben</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={10080}
-                  value={lightIntervalMinutes ?? ""}
-                  onChange={(e) =>
-                    setLightIntervalMinutes(
-                      e.target.value ? Number(e.target.value) : null
-                    )
-                  }
-                  className="mt-0.5 w-32 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-ktsRed"
-                />
-                <span className="text-xs text-slate-400">
-                  Gyakoribb, gyors heartbeat ellenőrzés (csak státusz és válaszidő).
-                </span>
-              </label>
-            </div>
-
-            <div className="flex flex-col gap-3 pt-2 text-xs text-slate-400">
+            <div className="p-6 space-y-8">
               {intervalLoading ? (
-                <p className="flex items-center gap-2">
-                  <span className="h-3 w-3 border-2 border-slate-600 border-t-ktsRed rounded-full animate-spin" />
-                  <span>Intervallumok betöltése…</span>
-                </p>
+                <div className="flex flex-col items-center justify-center py-10 text-slate-400 space-y-3">
+                  <span className="h-8 w-8 border-2 border-slate-700 border-t-ktsRed rounded-full animate-spin" />
+                  <span className="text-sm">Beállítások betöltése...</span>
+                </div>
               ) : (
                 <>
-                  <p>
-                    Deep aktuális érték:{" "}
-                    {intervalMinutes != null ? `${intervalMinutes} perc` : "—"}
-                  </p>
-                  <p>
-                    Light aktuális érték:{" "}
-                    {lightIntervalMinutes != null
-                      ? `${lightIntervalMinutes} perc`
-                      : "—"}
-                  </p>
+                  {/* --- Monitorozás Szekció --- */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Monitorozási intervallumok
+                    </h4>
+
+                    {/* Deep Check */}
+                    <div className="flex items-end gap-3">
+                      <label className="flex-1 space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-slate-200">
+                            Deep ellenőrzés (perc)
+                          </span>
+                        </div>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10080}
+                          value={intervalMinutes ?? ""}
+                          onChange={(e) =>
+                            setIntervalMinutesState(
+                              e.target.value ? Number(e.target.value) : null
+                            )
+                          }
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none"
+                          placeholder="pl. 60"
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          Részletes ellenőrzés (SSL, tartalom, stabilitás).
+                        </p>
+                      </label>
+                      <button
+                        onClick={saveInterval}
+                        disabled={intervalSaving || intervalMinutes == null}
+                        className="mb-6 inline-flex h-9 items-center rounded-lg bg-slate-800 px-4 text-xs font-medium text-white hover:bg-ktsRed disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      >
+                        {intervalSaving ? "..." : "Mentés"}
+                      </button>
+                    </div>
+
+                    {/* Light Check */}
+                    <div className="flex items-end gap-3">
+                      <label className="flex-1 space-y-1.5">
+                        <span className="text-sm font-medium text-slate-200">
+                          Light / Heartbeat (perc)
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10080}
+                          value={lightIntervalMinutes ?? ""}
+                          onChange={(e) =>
+                            setLightIntervalMinutes(
+                              e.target.value ? Number(e.target.value) : null
+                            )
+                          }
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none"
+                          placeholder="pl. 5"
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          Gyors státusz és válaszidő ellenőrzés.
+                        </p>
+                      </label>
+                      <button
+                        onClick={saveLightInterval}
+                        disabled={
+                          lightIntervalSaving || lightIntervalMinutes == null
+                        }
+                        className="mb-6 inline-flex h-9 items-center rounded-lg bg-slate-800 px-4 text-xs font-medium text-white hover:bg-ktsRed disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      >
+                        {lightIntervalSaving ? "..." : "Mentés"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <hr className="border-slate-800" />
+
+                  {/* --- Adatkezelés Szekció --- */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Adatkezelés
+                    </h4>
+
+                    {/* Log Retention */}
+                    <div className="flex items-end gap-3">
+                      <label className="flex-1 space-y-1.5">
+                        <span className="text-sm font-medium text-slate-200">
+                          Napló megőrzés (nap)
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={logRetentionDays ?? ""}
+                          onChange={(e) =>
+                            setLogRetentionDays(
+                              e.target.value ? Number(e.target.value) : null
+                            )
+                          }
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none"
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          A régebbi bejegyzések automatikusan törlődnek.
+                        </p>
+                      </label>
+                      <button
+                        onClick={saveLogRetention}
+                        disabled={
+                          logRetentionSaving || logRetentionDays == null
+                        }
+                        className="mb-6 inline-flex h-9 items-center rounded-lg bg-slate-800 px-4 text-xs font-medium text-white hover:bg-ktsRed disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      >
+                        {logRetentionSaving ? "..." : "Mentés"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* --- Danger Zone --- */}
+                  <div className="rounded-xl border border-red-900/30 bg-red-950/10 p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-semibold text-red-400">
+                          Veszélyes Zóna
+                        </h4>
+                        <p className="text-xs text-red-300/60 leading-relaxed">
+                          Minden naplóbejegyzés azonnali törlése az
+                          adatbázisból.
+                          <br />
+                          Ez a művelet nem visszavonható.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleDeleteAllLogs}
+                        disabled={deletingAllLogs}
+                        className="whitespace-nowrap rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-500 hover:text-white hover:border-transparent disabled:opacity-50 transition"
+                      >
+                        {deletingAllLogs ? "Törlés..." : "Összes törlése"}
+                      </button>
+                    </div>
+                  </div>
                 </>
               )}
-
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  onClick={saveInterval}
-                  disabled={
-                    intervalSaving || intervalLoading || intervalMinutes == null
-                  }
-                  className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
-                >
-                  {intervalSaving ? "Deep mentése…" : "Deep mentése"}
-                </button>
-                <button
-                  onClick={saveLightInterval}
-                  disabled={
-                    lightIntervalSaving || intervalLoading || lightIntervalMinutes == null
-                  }
-                  className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
-                >
-                  {lightIntervalSaving ? "Light mentése…" : "Light mentése"}
-                </button>
-              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Edit monitor modal */}
       {editMonitor && (
         <div
-          className="fixed inset-0 z-30 flex items-center justify-center bg-black/70"
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
           onClick={() => setEditMonitor(null)}
         >
           <div
-            className="max-w-md w-[94%] rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl p-5 space-y-4"
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between gap-3">
+            {/* --- Fejléc --- */}
+            <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/50 px-6 py-4">
               <div>
-                <h3 className="text-base sm:text-lg font-semibold text-slate-50">
+                <h3 className="text-lg font-semibold text-slate-50">
                   Monitor szerkesztése
                 </h3>
-                <p className="text-xs text-slate-400 break-all">
-                  {editMonitor.url}
+                <p className="text-xs text-slate-400">
+                  A kiválasztott végpont paramétereinek módosítása.
                 </p>
               </div>
               <button
                 onClick={() => setEditMonitor(null)}
-                className="inline-flex items-center rounded-full bg-slate-800 hover:bg-slate-700 text-xs text-slate-100 px-3 py-1.5 border border-slate-600 transition"
+                className="rounded-full bg-slate-800 p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition"
               >
-                Bezárás
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
               </button>
             </div>
 
-            <div className="space-y-3 text-sm text-slate-200">
-              <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-300">
-                  URL
+            {/* --- Tartalom --- */}
+            <div className="p-6 space-y-6">
+              {/* URL Input */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Célpont URL
                 </label>
                 <input
                   type="text"
                   value={editUrl}
                   onChange={(e) => setEditUrl(e.target.value)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-ktsRed focus:border-ktsRed transition"
+                  placeholder="https://pelda.hu"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none transition"
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="block text-xs font-medium text-slate-300">
-                  Megjelenített név (opcionális)
+              {/* Név Input */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Megjelenített név{" "}
+                  <span className="text-slate-600 font-normal normal-case">
+                    (opcionális)
+                  </span>
                 </label>
                 <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-ktsRed focus:border-ktsRed transition"
+                  placeholder="pl. Ügyfél Portál"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none transition"
                 />
               </div>
 
-              <label className="flex items-center gap-2 text-xs text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={editIsActive}
-                  onChange={(e) => setEditIsActive(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-ktsRed focus:ring-ktsRed"
-                />
-                <span>Aktív monitorozás engedélyezése</span>
-              </label>
+              {/* Aktív Státusz Toggle */}
+              <div
+                onClick={() => setEditIsActive(!editIsActive)}
+                className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-800 bg-slate-900/40 p-3 hover:bg-slate-900/80 transition"
+              >
+                <div className="space-y-0.5">
+                  <span className="block text-sm font-medium text-slate-200">
+                    Aktív monitorozás
+                  </span>
+                  <span className="block text-xs text-slate-500">
+                    Ha kikapcsolod, a rendszer nem ellenőrzi ezt az oldalt.
+                  </span>
+                </div>
+
+                {/* Custom Toggle Switch UI */}
+                <div
+                  className={`relative h-6 w-11 rounded-full transition-colors duration-200 ease-in-out ${
+                    editIsActive ? "bg-ktsRed" : "bg-slate-700"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out mt-1 ml-1 ${
+                      editIsActive ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-1">
+            {/* --- Lábléc / Gombok --- */}
+            <div className="flex items-center justify-end gap-3 border-t border-slate-800 bg-slate-900/30 px-6 py-4">
               <button
                 onClick={() => setEditMonitor(null)}
-                className="inline-flex items-center rounded-full bg-slate-800 hover:bg-slate-700 text-xs text-slate-100 px-4 py-1.5 border border-slate-600 transition"
+                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
               >
                 Mégse
               </button>
               <button
                 onClick={saveEditMonitor}
                 disabled={editSaving}
-                className="inline-flex items-center rounded-full bg-ktsRed hover:bg-ktsLightRed disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1.5 text-xs font-semibold text-white transition"
+                className="inline-flex items-center rounded-lg bg-ktsRed px-5 py-2 text-sm font-medium text-white hover:bg-ktsLightRed disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg shadow-ktsRed/20"
               >
-                {editSaving ? "Mentés…" : "Mentés"}
+                {editSaving ? (
+                  <>
+                    <span className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Mentés...
+                  </>
+                ) : (
+                  "Változások mentése"
+                )}
               </button>
             </div>
           </div>

@@ -104,6 +104,12 @@ export async function fetchSiteLogs(id: number, limit = 50) {
 	return apiFetch(`/sites/${id}/logs?limit=${limit}`);
 }
 
+export async function deleteSiteLogs(id: number) {
+	return apiFetch(`/sites/${id}/logs`, {
+		method: 'DELETE',
+	});
+}
+
 export async function getMonitorInterval() {
 	return apiFetch('/settings/monitor-interval');
 }
@@ -123,5 +129,22 @@ export async function setLightMonitorInterval(interval_minutes: number) {
 	return apiFetch('/settings/monitor-interval-light', {
 		method: 'POST',
 		body: JSON.stringify({ interval_minutes }),
+	});
+}
+
+export async function getLogRetentionDays(): Promise<{ retention_days: number }> {
+	return apiFetch('/settings/log-retention');
+}
+
+export async function setLogRetentionDays(retention_days: number) {
+	return apiFetch('/settings/log-retention', {
+		method: 'POST',
+		body: JSON.stringify({ retention_days }),
+	});
+}
+
+export async function deleteAllLogs() {
+	return apiFetch('/logs', {
+		method: 'DELETE',
 	});
 }
