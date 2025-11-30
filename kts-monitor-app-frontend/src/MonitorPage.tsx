@@ -71,6 +71,7 @@ export const MonitorPage: React.FC = () => {
 
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [isSorting, setIsSorting] = useState(false);
 
   const [logModalMonitor, setLogModalMonitor] = useState<Monitor | null>(null);
   const [logs, setLogs] = useState<MonitorLog[]>([]);
@@ -502,7 +503,11 @@ export const MonitorPage: React.FC = () => {
               <div className="relative group flex-1 sm:flex-none">
                 <select
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
+                  onChange={(e) => {
+                    setIsSorting(true);
+                    setSortBy(e.target.value);
+                    setTimeout(() => setIsSorting(false), 250);
+                  }}
                   className="w-full sm:w-auto appearance-none bg-slate-950 text-slate-200 text-xs font-medium rounded-lg pl-3 pr-9 py-2 border border-slate-800 focus:ring-1 focus:ring-ktsRed focus:border-ktsRed focus:outline-none cursor-pointer hover:border-slate-700 transition"
                 >
                   <option value="name">Név (A-Z)</option>
@@ -521,9 +526,13 @@ export const MonitorPage: React.FC = () => {
               </div>
 
               <button
-                onClick={() =>
-                  setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-                }
+                onClick={() => {
+                  setIsSorting(true);
+                  setSortDirection(
+                    sortDirection === "asc" ? "desc" : "asc"
+                  );
+                  setTimeout(() => setIsSorting(false), 250);
+                }}
                 className="px-3 py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg border border-slate-800 hover:border-slate-700 transition flex items-center justify-center min-w-[40px]"
                 title={sortDirection === "asc" ? "Növekvő" : "Csökkenő"}
               >
@@ -598,7 +607,11 @@ export const MonitorPage: React.FC = () => {
                       <th className="px-6 py-4 text-right">Műveletek</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/50">
+                  <tbody
+                    className={`divide-y divide-slate-800/50 transition-opacity duration-200 ${
+                      isSorting ? "opacity-60" : "opacity-100"
+                    }`}
+                  >
                     {activeSites.length === 0 ? (
                       <tr>
                         <td
@@ -618,9 +631,9 @@ export const MonitorPage: React.FC = () => {
                         return (
                           <tr
                             key={m.id}
-                            className={`group hover:bg-slate-900/60 transition-colors ${
+                            className={`group hover:bg-slate-900/60 transition-all duration-200 ${
                               rowRefreshing
-                                ? "opacity-50 pointer-events-none"
+                                ? "opacity-40 pointer-events-none"
                                 : ""
                             }`}
                           >
@@ -810,7 +823,7 @@ export const MonitorPage: React.FC = () => {
             </div>
 
             {/* --- Mobile Card View --- */}
-            <div className="grid gap-4 md:hidden">
+            <div className="grid gap-4 md:hidden transition-opacity duration-200">
               {activeSites.length === 0 ? (
                 <div className="text-center py-8 text-slate-500 bg-slate-900/50 rounded-xl border border-slate-800">
                   Nincs megjeleníthető adat.
@@ -825,8 +838,10 @@ export const MonitorPage: React.FC = () => {
                   return (
                     <div
                       key={m.id}
-                      className={`relative rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm space-y-4 ${
-                        rowRefreshing ? "opacity-70 pointer-events-none" : ""
+                      className={`relative rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm space-y-4 transition-all duration-200 ${
+                        rowRefreshing
+                          ? "opacity-60 pointer-events-none"
+                          : "hover:translate-y-0.5 hover:border-slate-700"
                       }`}
                     >
                       {/* Card Header */}
