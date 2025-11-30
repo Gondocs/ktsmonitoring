@@ -27,14 +27,24 @@ class CheckSitesLight extends Command
             $monitors = Monitor::where('is_active', true)->get();
         } else {
             // Scheduler run: only check monitors that are due, up to batch size
-            $monitors = Monitor::where('is_active', true)
-                ->where(function ($q) use ($intervalMinutes) {
-                    $q->whereNull('last_checked_at')
-                      ->orWhere('last_checked_at', '<=', now()->subMinutes($intervalMinutes));
-                })
-                ->orderBy('last_checked_at', 'asc')
-                ->limit($batchSize)
-                ->get();
+
+            // Special case: if interval is 1 minute or less, treat all active
+            // monitors as always due (still respecting batch size for safety).
+            if ($intervalMinutes <= 1) {
+                $monitors = Monitor::where('is_active', true)
+                    ->orderBy('last_checked_at', 'asc')
+                    ->limit($batchSize)
+                    ->get();
+            } else {
+                $monitors = Monitor::where('is_active', true)
+                    ->where(function ($q) use ($intervalMinutes) {
+                        $q->whereNull('last_checked_at')
+                          ->orWhere('last_checked_at', '<=', now()->subMinutes($intervalMinutes));
+                    })
+                    ->orderBy('last_checked_at', 'asc')
+                    ->limit($batchSize)
+                    ->get();
+            }
 
             if ($monitors->isEmpty()) {
                 $this->info('Nincs light ellenőrzésre esedékes monitor.');
