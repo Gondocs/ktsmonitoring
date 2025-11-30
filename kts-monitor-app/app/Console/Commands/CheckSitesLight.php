@@ -50,12 +50,12 @@ class CheckSitesLight extends Command
             $error = null;
 
             try {
-                $response = Http::timeout(5)
+                $response = Http::timeout(10)
                     ->withHeaders(['User-Agent' => self::USER_AGENT])
                     ->head($monitor->url);
 
                 $statusCode = $response->status();
-                
+
                 // Megpróbálom ez nélkü, hogy futnak-e problémák a HEAD kéréssel
                /*
                 if ($statusCode === 405) {

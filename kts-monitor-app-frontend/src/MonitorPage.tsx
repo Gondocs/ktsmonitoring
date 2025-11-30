@@ -24,7 +24,7 @@ import {
   updateSite,
   deleteSiteLogs,
   getLogRetentionDays,
-  setLogRetentionDays,
+  setLogRetentionDays as apiSetLogRetentionDays,
   deleteAllLogs,
 } from "./api.ts";
 import { useAuth } from "./auth.tsx";
@@ -327,7 +327,7 @@ export const MonitorPage: React.FC = () => {
     if (logRetentionDays == null || Number.isNaN(logRetentionDays)) return;
     setLogRetentionSaving(true);
     try {
-      await setLogRetentionDays(logRetentionDays);
+      await apiSetLogRetentionDays(logRetentionDays);
       alert("Napló megőrzési idő sikeresen frissítve.");
     } catch (err: any) {
       alert(
