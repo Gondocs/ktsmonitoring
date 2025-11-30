@@ -655,7 +655,7 @@ export const MonitorPage: React.FC = () => {
                             {/* Status Badge */}
                             <td className="px-4 py-4 text-center">
                               <span
-                                className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold border"
+                                className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/40 border border-emerald-900/50 px-1.5 py-0.5 rounded "
                                 style={{
                                   color: statusColor(m),
                                   backgroundColor: `${statusColor(m)}15`,
