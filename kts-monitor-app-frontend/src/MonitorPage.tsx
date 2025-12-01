@@ -9,6 +9,15 @@ import {
   FiZap,
 } from "react-icons/fi";
 import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
+import {
   fetchSites,
   checkAllSites,
   checkOneSite,
@@ -100,6 +109,8 @@ export const MonitorPage: React.FC = () => {
 
   const [deletingAllLogs, setDeletingAllLogs] = useState(false);
   const [deletingSiteLogs, setDeletingSiteLogs] = useState(false);
+
+  const [logViewTab, setLogViewTab] = useState<"table" | "chart">("table");
 
   const loadSites = async () => {
     setLoading(true);
@@ -1142,6 +1153,32 @@ export const MonitorPage: React.FC = () => {
                   </svg>
                   {logsLoading ? "Betöltés..." : "Frissítés"}
                 </button>
+
+                {/* Nézet váltó: Táblázat / Grafikon */}
+                <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/60 px-1 py-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setLogViewTab("table")}
+                    className={`px-2 py-1 rounded-md transition ${
+                      logViewTab === "table"
+                        ? "bg-slate-800 text-slate-100"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Táblázat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLogViewTab("chart")}
+                    className={`px-2 py-1 rounded-md transition ${
+                      logViewTab === "chart"
+                        ? "bg-slate-800 text-slate-100"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Grafikon
+                  </button>
+                </div>
               </div>
 
               {/* Jobb oldal: Veszélyes művelet */}
@@ -1167,7 +1204,7 @@ export const MonitorPage: React.FC = () => {
               </button>
             </div>
 
-            {/* --- Táblázat Tartalom --- */}
+            {/* --- Tartalom: Táblázat vagy Grafikon --- */}
             <div className="flex-1 overflow-auto bg-slate-950 relative">
               {logsLoading && logs.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-slate-400 gap-2">
@@ -1190,6 +1227,99 @@ export const MonitorPage: React.FC = () => {
                     />
                   </svg>
                   <p className="text-sm">Nincsenek elérhető bejegyzések.</p>
+                </div>
+              ) : logViewTab === "chart" ? (
+                <div className="h-full w-full flex flex-col">
+                  <div className="px-6 pt-4 pb-2 text-xs text-slate-400 flex justify-between items-center">
+                    <span>
+                      Válaszidő alakulása (ms) az utolsó {logs.length} mérés alapján.
+                    </span>
+                    <span className="flex items-center gap-3 text-[10px] text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-3 h-1.5 rounded bg-slate-300" />
+                        <span>&lt;= 1000ms</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-3 h-1.5 rounded bg-orange-400" />
+                        <span>1001–5000ms</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-3 h-1.5 rounded bg-red-400" />
+                        <span>&gt; 5000ms / hiba</span>
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex-1 px-4 pb-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={[...logs]
+                          .filter((l) => l.response_time_ms !== null)
+                          .map((l) => ({
+                            ...l,
+                            // X tengelyre egy olvasható idő string
+                            // + 1 óra hozzáadása a téli idő miatt
+                            timeLabel: new Date(
+                              (new Date(l.checked_at || l.created_at)).getTime() + 3600000
+                            ).toLocaleTimeString("hu-HU", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            }),
+                            // Szín kategória a válaszidő alapján
+                            bucket:
+                              l.response_time_ms! > 5000
+                                ? "slow"
+                                : l.response_time_ms! > 1000
+                                ? "medium"
+                                : "fast",
+                          }))
+                        .reverse()}
+                        margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                        <XAxis
+                          dataKey="timeLabel"
+                          tick={{ fontSize: 10, fill: "#9ca3af" }}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10, fill: "#9ca3af" }}
+                          width={50}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#020617",
+                            border: "1px solid #1f2937",
+                            borderRadius: 8,
+                            fontSize: 11,
+                          }}
+                          labelStyle={{ color: "#9ca3af" }}
+                          formatter={(value: any, _name, props: any) => {
+                            const rt = value as number;
+                            const bucket = props?.payload?.bucket;
+                            const label =
+                              bucket === "slow"
+                                ? "> 5000ms"
+                                : bucket === "medium"
+                                ? "1001–5000ms"
+                                : "<= 1000ms";
+                            return [`${rt} ms`, label];
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="response_time_ms"
+                          stroke="#e5e7eb"
+                          strokeWidth={2}
+                          dot={{
+                            r: 3,
+                            strokeWidth: 0,
+                            fill: "#e5e7eb",
+                          }}
+                          activeDot={{ r: 5 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               ) : (
                 <table className="min-w-full text-left text-xs">
