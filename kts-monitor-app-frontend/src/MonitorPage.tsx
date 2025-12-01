@@ -723,9 +723,9 @@ export const MonitorPage: React.FC = () => {
                                   <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                                     <div
                                       className={`h-full rounded-full ${
-                                        m.stability_score > 90
+                                        m.stability_score >= 95
                                           ? "bg-green-500"
-                                          : m.stability_score > 70
+                                          : m.stability_score >= 85
                                           ? "bg-yellow-500"
                                           : "bg-red-500"
                                       }`}
@@ -1245,7 +1245,9 @@ export const MonitorPage: React.FC = () => {
                               <>
                                 <span
                                   className={
-                                    log.response_time_ms > 1000
+                                    log.response_time_ms > 5000
+                                      ? "text-red-400"
+                                      : log.response_time_ms > 1000
                                       ? "text-orange-400"
                                       : "text-slate-200"
                                   }

@@ -137,7 +137,7 @@ class MonitorController extends Controller
 
             try {
                 $start = microtime(true);
-                $response = Http::timeout(5)->withOptions([
+                $response = Http::timeout(10)->withOptions([
                     'allow_redirects' => [
                         'max' => 10,
                         'track_redirects' => true,
@@ -230,6 +230,13 @@ class MonitorController extends Controller
             'last_checked_at' => now(),
         ]);
 
+        // Recalculate 24h stability based on last 96 logs (including timeouts > 5000ms)
+        $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
+        if ($stability24h !== null) {
+            $monitor->stability_score = $stability24h;
+            $monitor->save();
+        }
+
         $monitor->refresh();
 
         return response()->json([
@@ -249,14 +256,14 @@ class MonitorController extends Controller
 
         try {
             $start = microtime(true);
-            $response = Http::timeout(5)
+            $response = Http::timeout(10)
                 ->withHeaders(['User-Agent' => CheckSitesLight::USER_AGENT])
                 ->head($monitor->url);
 
             $statusCode = $response->status();
 
             if ($statusCode === 405) {
-                $response = Http::timeout(5)
+                $response = Http::timeout(10)
                     ->withHeaders(['User-Agent' => CheckSitesLight::USER_AGENT])
                     ->get($monitor->url);
                 $statusCode = $response->status();
@@ -281,6 +288,13 @@ class MonitorController extends Controller
             'last_response_time_ms' => $responseTime,
             'last_checked_at' => now(),
         ]);
+
+        // Recalculate 24h stability based on last 96 logs (including slow responses / timeouts)
+        $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
+        if ($stability24h !== null) {
+            $monitor->stability_score = $stability24h;
+            $monitor->save();
+        }
 
         $monitor->refresh();
 

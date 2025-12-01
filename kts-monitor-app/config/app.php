@@ -130,6 +130,6 @@ return [
     'monitor_interval_light_minutes' => env('MONITOR_INTERVAL_LIGHT_MINUTES', 15),
 
     // Maximum number of light checks per automatic scheduler run
-    'monitor_light_batch_size' => env('MONITOR_LIGHT_BATCH_SIZE', 15),
+    'monitor_light_batch_size' => env('MONITOR_LIGHT_BATCH_SIZE', 10),
 
 ];

@@ -55,7 +55,7 @@ class CheckSitesLight extends Command
                 // Megpróbálom ez nélkü, hogy futnak-e problémák a HEAD kéréssel
                 /*
                  if ($statusCode === 405) {
-                     $response = Http::timeout(5)
+                     $response = Http::timeout(10)
                          ->withHeaders(['User-Agent' => self::USER_AGENT])
                          ->get($monitor->url);
                      $statusCode = $response->status();
@@ -85,6 +85,13 @@ class CheckSitesLight extends Command
                 'last_response_time_ms' => $responseTime,
                 'last_checked_at' => now(),
             ]);
+
+            // Recalculate 24h stability from logs (max 96 entries, >5000ms = failure)
+            $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
+            if ($stability24h !== null) {
+                $monitor->stability_score = $stability24h;
+                $monitor->save();
+            }
 
             $statusMsg = $isUp ? 'OK (' . $statusCode . ')' : 'HIBA (' . $statusCode . ')';
             $this->line($monitor->url . ' -> ' . $statusMsg . ' (' . $responseTime . 'ms)');

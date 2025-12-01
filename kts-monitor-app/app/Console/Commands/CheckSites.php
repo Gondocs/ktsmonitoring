@@ -55,7 +55,7 @@ class CheckSites extends Command
 
                 try {
                     $start = microtime(true);
-                    $response = Http::timeout(5)->withOptions([
+                    $response = Http::timeout(  10)->withOptions([
                         'allow_redirects' => [
                             'max' => 10,
                             'track_redirects' => true,
@@ -163,9 +163,15 @@ class CheckSites extends Command
                 'is_wordpress' => $isWordpress,
                 'wordpress_version' => $wordpressVersion,
                 'content_last_modified_at' => $contentLastModifiedAt,
-                'stability_score' => $stabilityScore,
                 'last_checked_at' => now(),
             ]);
+
+            // Recalculate 24h stability from logs (max 96 entries, >5000ms = failure)
+            $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
+            if ($stability24h !== null) {
+                $monitor->stability_score = $stability24h;
+                $monitor->save();
+            }
         }
 
 
