@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { useAuth } from "./auth.tsx";
+import { useAuth } from "../Auth/auth.tsx";
 import { FiMail, FiLock, FiArrowRight, FiLoader } from "react-icons/fi";
-import Aurora from "./Aurora.tsx"; // Adjust path if necessary
+import Aurora from "../Aurora.tsx"; // Adjust path if necessary
 
 type Props = {
   onLoggedIn: () => void;

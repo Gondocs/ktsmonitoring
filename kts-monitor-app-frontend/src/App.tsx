@@ -1,7 +1,7 @@
 import React from 'react';
-import { AuthProvider, useAuth } from './auth.tsx';
-import { LoginPage } from './LoginPage.tsx';
-import { MonitorPage } from './MonitorPage.tsx';
+import { AuthProvider, useAuth } from './Auth/auth.tsx';
+import { LoginPage } from './LoginPage/LoginPage.tsx';
+import { MonitorPage } from './MonitorPage/MonitorPage.tsx';
 import { ClipLoader } from 'react-spinners'; // You can choose other loaders like BeatLoader, PulseLoader
 
 const AppInner: React.FC = () => {

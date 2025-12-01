@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { fetchMe, login as apiLogin, setAuthToken } from "./api.ts";
+import { fetchMe, login as apiLogin, setAuthToken } from "../Api/api.ts";
 
 type User = {
   id: number;

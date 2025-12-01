@@ -35,8 +35,8 @@ import {
   getLogRetentionDays,
   setLogRetentionDays as apiSetLogRetentionDays,
   deleteAllLogs,
-} from "./api.ts";
-import { useAuth } from "./auth.tsx";
+} from "./Api/api.ts";
+import { useAuth } from "./Auth/auth.tsx";
 
 type Monitor = {
   id: number;
