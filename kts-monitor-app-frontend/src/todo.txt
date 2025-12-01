@@ -1,8 +1,4 @@
-
-- Színek megváltoztatása
-- Szövegek középre igazítása
 - Jelenlegi URL és nevek szerkesztése
-
 - Felhasználó létrehozása
 - Routing
 - Tesztek írása
