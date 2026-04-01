@@ -38,13 +38,35 @@ type LogsModalProps = {
 };
 
 const chartRangeOptions: { value: ChartRange; label: string }[] = [
+  { value: "1h", label: "1 óra" },
+  { value: "4h", label: "4 óra" },
+  { value: "12h", label: "12 óra" },
   { value: "24h", label: "24 óra" },
+  { value: "48h", label: "48 óra" },
   { value: "7d", label: "7 nap" },
-  { value: "30d", label: "30 nap" },
-  { value: "90d", label: "90 nap" },
+  { value: "14d", label: "14 nap" },
 ];
 
 const BRAND_BLUE = "#073a59";
+
+const formatResponseTick = (timestamp: number, range: ChartRange) => {
+  const date = new Date(timestamp);
+  const shortRange = ["1h", "4h", "12h", "24h", "48h"].includes(range);
+
+  if (shortRange) {
+    return date.toLocaleTimeString("hu-HU", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  return date.toLocaleString("hu-HU", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 export const LogsModal: React.FC<LogsModalProps> = ({
   monitor,
@@ -64,7 +86,7 @@ export const LogsModal: React.FC<LogsModalProps> = ({
   const chartData = useMemo(() => {
     const start = getRangeStartDate(chartRange).getTime();
 
-    return [...logs]
+    const points = [...logs]
       .filter((l) => l.response_time_ms != null)
       .map((l) => {
         const date = parseMonitorDate(l.checked_at || l.created_at);
@@ -72,12 +94,14 @@ export const LogsModal: React.FC<LogsModalProps> = ({
         return {
           id: l.id,
           timestamp: time,
-          idopont: date
+          tooltipLabel: date
             ? date.toLocaleString("hu-HU", {
+                year: "numeric",
                 month: "2-digit",
                 day: "2-digit",
                 hour: "2-digit",
                 minute: "2-digit",
+                second: "2-digit",
               })
             : "-",
           valaszido: l.response_time_ms,
@@ -91,6 +115,19 @@ export const LogsModal: React.FC<LogsModalProps> = ({
       })
       .filter((x) => x.timestamp >= start)
       .sort((a, b) => a.timestamp - b.timestamp);
+
+    const used = new Set<number>();
+    return points.map((p) => {
+      let ts = p.timestamp;
+      while (used.has(ts)) {
+        ts += 1;
+      }
+      used.add(ts);
+      return {
+        ...p,
+        timestamp: ts,
+      };
+    });
   }, [logs, chartRange]);
 
   return (
@@ -252,8 +289,16 @@ export const LogsModal: React.FC<LogsModalProps> = ({
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis
-                        dataKey="idopont"
+                        dataKey="timestamp"
+                        type="number"
+                        scale="time"
+                        domain={["dataMin", "dataMax"]}
+                        tickFormatter={(value) =>
+                          formatResponseTick(Number(value), chartRange)
+                        }
                         tick={{ fontSize: 10, fill: "#64748b" }}
+                        interval="preserveStartEnd"
+                        minTickGap={36}
                       />
                       <YAxis
                         tick={{ fontSize: 10, fill: "#64748b" }}
@@ -265,6 +310,10 @@ export const LogsModal: React.FC<LogsModalProps> = ({
                           border: "1px solid #cbd5e1",
                           borderRadius: 8,
                           fontSize: 11,
+                        }}
+                        labelFormatter={(_label: any, payload: any) => {
+                          const point = payload?.[0]?.payload;
+                          return `Időpont: ${point?.tooltipLabel ?? "-"}`;
                         }}
                         formatter={(value: any, _name, props: any) => {
                           const bucket = props?.payload?.bucket;
@@ -278,7 +327,7 @@ export const LogsModal: React.FC<LogsModalProps> = ({
                         }}
                       />
                       <Line
-                        type="monotone"
+                        type="linear"
                         dataKey="valaszido"
                         stroke={BRAND_BLUE}
                         strokeWidth={2}

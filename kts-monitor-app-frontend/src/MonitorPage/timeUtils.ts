@@ -1,10 +1,13 @@
-export type ChartRange = "24h" | "7d" | "30d" | "90d";
+export type ChartRange = "1h" | "4h" | "12h" | "24h" | "48h" | "7d" | "14d";
 
 const RANGE_MS: Record<ChartRange, number> = {
+  "1h": 1 * 60 * 60 * 1000,
+  "4h": 4 * 60 * 60 * 1000,
+  "12h": 12 * 60 * 60 * 1000,
   "24h": 24 * 60 * 60 * 1000,
+  "48h": 48 * 60 * 60 * 1000,
   "7d": 7 * 24 * 60 * 60 * 1000,
-  "30d": 30 * 24 * 60 * 60 * 1000,
-  "90d": 90 * 24 * 60 * 60 * 1000,
+  "14d": 14 * 24 * 60 * 60 * 1000,
 };
 
 export const parseMonitorDate = (value: string | null | undefined): Date | null => {

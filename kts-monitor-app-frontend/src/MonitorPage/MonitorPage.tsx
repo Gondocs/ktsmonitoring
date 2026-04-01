@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiActivity,
   FiAlertTriangle,
+  FiChevronDown,
+  FiChevronUp,
   FiCheckCircle,
   FiClock,
   FiEdit2,
   FiExternalLink,
   FiFileText,
-  FiGlobe,
   FiLogOut,
   FiPlus,
   FiRefreshCw,
@@ -15,6 +16,8 @@ import {
   FiSettings,
   FiShield,
   FiTrash2,
+  FiMaximize2,
+  FiX,
   FiZap,
 } from "react-icons/fi";
 import {
@@ -49,10 +52,10 @@ import {
 } from "../Api/api.ts";
 import { useAuth } from "../Auth/auth.tsx";
 import { Monitor, MonitorLog } from "./MonitorTypes.ts";
-import { LogsModal } from "./LogsModal";
+import { LogsModal } from "./LogsModal.tsx";
 import { SettingsModal } from "./SettingsModal.tsx";
 import { EditMonitorModal } from "./EditMonitorModal.tsx";
-import { ActivityHeatmap } from "./ActivityHeatmap.tsx";
+import { ActivityHeatmap, HeatmapRange } from "./ActivityHeatmap.tsx";
 import {
   ChartRange,
   formatDateTimeHu,
@@ -68,15 +71,44 @@ type GlobalLogEntry = MonitorLog & {
   monitor_url: string;
 };
 
+const getGlobalLogKey = (log: Pick<GlobalLogEntry, "monitor_id" | "id">) =>
+  `${log.monitor_id}-${log.id}`;
+
+type MonitorListFilter = "all" | "active" | "offline";
+type ExpandedPanel =
+  | "detailResponse"
+  | "detailHeatmap"
+  | "globalTrend"
+  | "globalHeatmap"
+  | null;
+
 const BRAND_BLUE = "#073a59";
 const BRAND_RED = "#af272f";
-const GLOBAL_LOGS_SITE_CAP = 20;
 
-const chartRangeOptions: { value: ChartRange; label: string }[] = [
+const responseChartRangeOptions: { value: ChartRange; label: string }[] = [
+  { value: "1h", label: "1 óra" },
+  { value: "4h", label: "4 óra" },
+  { value: "12h", label: "12 óra" },
   { value: "24h", label: "24 óra" },
+  { value: "48h", label: "48 óra" },
   { value: "7d", label: "7 nap" },
-  { value: "30d", label: "30 nap" },
-  { value: "90d", label: "90 nap" },
+  { value: "14d", label: "14 nap" },
+];
+
+const globalChartRangeOptions: { value: ChartRange; label: string }[] = [
+  { value: "24h", label: "24 óra" },
+  { value: "48h", label: "48 óra" },
+  { value: "7d", label: "7 nap" },
+  { value: "14d", label: "14 nap" },
+];
+
+const heatmapRangeOptions: { value: HeatmapRange; label: string }[] = [
+  { value: "6h", label: "6 óra" },
+  { value: "12h", label: "12 óra" },
+  { value: "24h", label: "24 óra" },
+  { value: "48h", label: "48 óra" },
+  { value: "7d", label: "7 nap" },
+  { value: "14d", label: "14 nap" },
 ];
 
 const safeHost = (url: string) => {
@@ -103,19 +135,42 @@ const getSslColor = (days: number | null) => {
   return "#16a34a";
 };
 
+const formatResponseTick = (timestamp: number, range: ChartRange) => {
+  const date = new Date(timestamp);
+  const shortRange = ["1h", "4h", "12h", "24h", "48h"].includes(range);
+
+  if (shortRange) {
+    return date.toLocaleTimeString("hu-HU", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  return date.toLocaleString("hu-HU", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const buildMonitorResponseChart = (logs: MonitorLog[], range: ChartRange) => {
   const start = getRangeStartDate(range).getTime();
 
-  return [...logs]
+  const points = [...logs]
     .filter((l) => l.response_time_ms != null)
     .map((l) => {
       const date = parseMonitorDate(l.checked_at || l.created_at);
       return {
         timestamp: date?.getTime() ?? 0,
-        idopont: date
-          ? date.toLocaleTimeString("hu-HU", {
+        tooltipLabel: date
+          ? date.toLocaleString("hu-HU", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
               hour: "2-digit",
               minute: "2-digit",
+              second: "2-digit",
             })
           : "-",
         valaszido: l.response_time_ms,
@@ -123,6 +178,19 @@ const buildMonitorResponseChart = (logs: MonitorLog[], range: ChartRange) => {
     })
     .filter((x) => x.timestamp >= start)
     .sort((a, b) => a.timestamp - b.timestamp);
+
+  const used = new Set<number>();
+  return points.map((p) => {
+    let ts = p.timestamp;
+    while (used.has(ts)) {
+      ts += 1;
+    }
+    used.add(ts);
+    return {
+      ...p,
+      timestamp: ts,
+    };
+  });
 };
 
 const buildGlobalOutageChart = (logs: GlobalLogEntry[], range: ChartRange) => {
@@ -183,15 +251,20 @@ export const MonitorPage: React.FC = () => {
 
   const [newUrl, setNewUrl] = useState("");
   const [newName, setNewName] = useState("");
+  const [addMonitorOpen, setAddMonitorOpen] = useState(false);
 
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isSorting, setIsSorting] = useState(false);
   const [searchValue, setSearchValue] = useState("");
+  const [monitorListFilter, setMonitorListFilter] =
+    useState<MonitorListFilter>("all");
   const [selectedMonitorId, setSelectedMonitorId] = useState<number | null>(
     null,
   );
   const [detailChartRange, setDetailChartRange] = useState<ChartRange>("7d");
+  const [detailHeatmapRange, setDetailHeatmapRange] =
+    useState<HeatmapRange>("24h");
 
   const [selectedMonitorLogs, setSelectedMonitorLogs] = useState<MonitorLog[]>(
     [],
@@ -205,6 +278,12 @@ export const MonitorPage: React.FC = () => {
   const [globalLogsScope, setGlobalLogsScope] = useState<string>("all");
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalChartRange, setGlobalChartRange] = useState<ChartRange>("7d");
+  const [globalHeatmapRange, setGlobalHeatmapRange] =
+    useState<HeatmapRange>("24h");
+  const [selectedGlobalLogKey, setSelectedGlobalLogKey] = useState<
+    string | null
+  >(null);
+  const [expandedPanel, setExpandedPanel] = useState<ExpandedPanel>(null);
 
   const [logModalMonitor, setLogModalMonitor] = useState<Monitor | null>(null);
   const [logs, setLogs] = useState<MonitorLog[]>([]);
@@ -250,6 +329,16 @@ export const MonitorPage: React.FC = () => {
     loadSites();
   }, []);
 
+  const refreshSelectedMonitorLogs = useCallback(async () => {
+    if (selectedMonitorId == null) return;
+    try {
+      const data = await fetchSiteLogs(selectedMonitorId, 400);
+      setSelectedMonitorLogs(data);
+    } catch {
+      // keep current chart data if refresh fails
+    }
+  }, [selectedMonitorId]);
+
   const filteredSites = useMemo(() => {
     const search = searchValue.trim().toLowerCase();
     if (!search) return sites;
@@ -261,10 +350,22 @@ export const MonitorPage: React.FC = () => {
     });
   }, [sites, searchValue]);
 
-  const sortedActiveSites = useMemo(() => {
-    const activeSites = filteredSites.filter((s) => s.is_active);
+  const kpiFilteredSites = useMemo(() => {
+    if (monitorListFilter === "active") {
+      return filteredSites.filter((s) => s.is_active);
+    }
 
-    return [...activeSites].sort((a, b) => {
+    if (monitorListFilter === "offline") {
+      return filteredSites.filter(
+        (s) => (s.last_status ?? 0) >= 400 || s.last_status == null,
+      );
+    }
+
+    return filteredSites;
+  }, [filteredSites, monitorListFilter]);
+
+  const sortedSites = useMemo(() => {
+    return [...kpiFilteredSites].sort((a, b) => {
       let v1: any;
       let v2: any;
 
@@ -302,17 +403,10 @@ export const MonitorPage: React.FC = () => {
       if (v1 > v2) return sortDirection === "asc" ? 1 : -1;
       return 0;
     });
-  }, [filteredSites, sortBy, sortDirection]);
-
-  const inactiveSites = useMemo(
-    () => filteredSites.filter((s) => !s.is_active),
-    [filteredSites],
-  );
+  }, [kpiFilteredSites, sortBy, sortDirection]);
 
   const selectedMonitor =
-    sites.find((s) => s.id === selectedMonitorId) ??
-    sortedActiveSites[0] ??
-    null;
+    sites.find((s) => s.id === selectedMonitorId) ?? sortedSites[0] ?? null;
 
   useEffect(() => {
     if (sites.length === 0) {
@@ -330,14 +424,14 @@ export const MonitorPage: React.FC = () => {
     let cancelled = false;
 
     const loadSelectedLogs = async () => {
-      if (!selectedMonitor) {
+      if (selectedMonitorId == null) {
         setSelectedMonitorLogs([]);
         return;
       }
 
       setSelectedMonitorLogsLoading(true);
       try {
-        const data = await fetchSiteLogs(selectedMonitor.id, 400);
+        const data = await fetchSiteLogs(selectedMonitorId, 400);
         if (!cancelled) {
           setSelectedMonitorLogs(data);
         }
@@ -356,7 +450,7 @@ export const MonitorPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedMonitor?.id]);
+  }, [selectedMonitorId]);
 
   const loadGlobalLogs = useCallback(
     async (scope: string = globalLogsScope) => {
@@ -366,14 +460,11 @@ export const MonitorPage: React.FC = () => {
       try {
         let monitorsToQuery: Monitor[] = [];
         if (scope === "all") {
-          monitorsToQuery = [...sites]
-            .filter((s) => s.is_active)
-            .sort((a, b) => {
-              const at = parseMonitorDate(a.last_checked_at)?.getTime() ?? 0;
-              const bt = parseMonitorDate(b.last_checked_at)?.getTime() ?? 0;
-              return bt - at;
-            })
-            .slice(0, GLOBAL_LOGS_SITE_CAP);
+          monitorsToQuery = [...sites].sort((a, b) => {
+            const at = parseMonitorDate(a.last_checked_at)?.getTime() ?? 0;
+            const bt = parseMonitorDate(b.last_checked_at)?.getTime() ?? 0;
+            return bt - at;
+          });
         } else {
           const found = sites.find((s) => String(s.id) === scope);
           monitorsToQuery = found ? [found] : [];
@@ -438,6 +529,10 @@ export const MonitorPage: React.FC = () => {
     }
   }, [mainView, globalLogsScope, loadGlobalLogs]);
 
+  useEffect(() => {
+    setSelectedGlobalLogKey(null);
+  }, [globalLogsScope, globalSearch]);
+
   const globalFilteredLogs = useMemo(() => {
     const search = globalSearch.trim().toLowerCase();
     if (!search) return globalLogs;
@@ -450,6 +545,23 @@ export const MonitorPage: React.FC = () => {
       );
     });
   }, [globalLogs, globalSearch]);
+
+  const selectedGlobalLog = useMemo(
+    () =>
+      selectedGlobalLogKey
+        ? globalFilteredLogs.find(
+            (log) => getGlobalLogKey(log) === selectedGlobalLogKey,
+          )
+        : null,
+    [globalFilteredLogs, selectedGlobalLogKey],
+  );
+
+  const globalLogsForTable = useMemo(() => {
+    if (!selectedGlobalLogKey) return globalFilteredLogs;
+    return globalFilteredLogs.filter(
+      (log) => getGlobalLogKey(log) === selectedGlobalLogKey,
+    );
+  }, [globalFilteredLogs, selectedGlobalLogKey]);
 
   const detailResponseChartData = useMemo(
     () => buildMonitorResponseChart(selectedMonitorLogs, detailChartRange),
@@ -490,6 +602,7 @@ export const MonitorPage: React.FC = () => {
     try {
       await checkAllSites();
       await loadSites();
+      await refreshSelectedMonitorLogs();
       if (mainView === "globalisNaplok") {
         await loadGlobalLogs(globalLogsScope);
       }
@@ -505,6 +618,7 @@ export const MonitorPage: React.FC = () => {
     try {
       await checkAllSitesLight();
       await loadSites();
+      await refreshSelectedMonitorLogs();
       if (mainView === "globalisNaplok") {
         await loadGlobalLogs(globalLogsScope);
       }
@@ -523,6 +637,9 @@ export const MonitorPage: React.FC = () => {
     try {
       await checkOneSite(id);
       await loadSites();
+      if (selectedMonitorId === id) {
+        await refreshSelectedMonitorLogs();
+      }
     } catch (err: any) {
       alert(err.message || "Nem sikerült frissíteni a weboldalt.");
     } finally {
@@ -535,6 +652,9 @@ export const MonitorPage: React.FC = () => {
     try {
       await checkOneSiteLight(id);
       await loadSites();
+      if (selectedMonitorId === id) {
+        await refreshSelectedMonitorLogs();
+      }
     } catch (err: any) {
       alert(
         err.message || "Nem sikerült gyors ellenőrzést futtatni a weboldalra.",
@@ -557,6 +677,7 @@ export const MonitorPage: React.FC = () => {
       await createSite({ url: normalizedUrl, name: newName || undefined });
       setNewUrl("");
       setNewName("");
+      setAddMonitorOpen(false);
       await loadSites();
     } catch (err: any) {
       alert(err.message || "Nem sikerült hozzáadni a weboldalt.");
@@ -751,6 +872,17 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
+  const isDetailExpanded =
+    expandedPanel === "detailResponse" || expandedPanel === "detailHeatmap";
+  const isGlobalExpanded =
+    expandedPanel === "globalTrend" || expandedPanel === "globalHeatmap";
+
+  const handleSelectGlobalLog = (
+    log: Pick<GlobalLogEntry, "monitor_id" | "id">,
+  ) => {
+    setSelectedGlobalLogKey(getGlobalLogKey(log));
+  };
+
   return (
     <div
       className="min-h-screen bg-[#f6f9fc] text-slate-800"
@@ -764,15 +896,12 @@ export const MonitorPage: React.FC = () => {
       <div className="relative flex min-h-screen">
         <aside className="hidden lg:flex w-72 flex-col justify-between border-r border-slate-200 bg-white/90 backdrop-blur-sm sticky top-0 h-screen">
           <div className="p-5 space-y-6">
-            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 flex items-center justify-center">
               <img
                 src="/ktsonlinelogo.png"
                 alt="KTS Online"
-                className="h-10 w-auto"
+                className="h-20 w-auto max-w-full lg:h-[200px]"
               />
-              <p className="mt-2 text-xs text-slate-500">
-                Weboldal monitor központ
-              </p>
             </div>
 
             <nav className="space-y-2 text-sm">
@@ -906,30 +1035,54 @@ export const MonitorPage: React.FC = () => {
           {mainView === "monitorok" ? (
             <>
               <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setMonitorListFilter("all")}
+                  className={`rounded-2xl border bg-white p-4 shadow-sm text-left transition ${
+                    monitorListFilter === "all"
+                      ? "border-[#073a59] ring-2 ring-[#073a59]/15"
+                      : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
                   <p className="text-xs uppercase tracking-wider text-slate-500">
                     Összes webhely
                   </p>
                   <p className="mt-2 text-3xl font-bold text-slate-900">
                     {stats.total}
                   </p>
-                </div>
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMonitorListFilter("active")}
+                  className={`rounded-2xl border bg-emerald-50 p-4 shadow-sm text-left transition ${
+                    monitorListFilter === "active"
+                      ? "border-emerald-500 ring-2 ring-emerald-500/20"
+                      : "border-emerald-200 hover:border-emerald-300"
+                  }`}
+                >
                   <p className="text-xs uppercase tracking-wider text-emerald-700">
                     Aktív webhely
                   </p>
                   <p className="mt-2 text-3xl font-bold text-emerald-700">
                     {stats.active}
                   </p>
-                </div>
-                <div className="rounded-2xl border border-[#af272f]/25 bg-[#af272f]/10 p-4 shadow-sm">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMonitorListFilter("offline")}
+                  className={`rounded-2xl border bg-[#af272f]/10 p-4 shadow-sm text-left transition ${
+                    monitorListFilter === "offline"
+                      ? "border-[#af272f] ring-2 ring-[#af272f]/20"
+                      : "border-[#af272f]/25 hover:border-[#af272f]/45"
+                  }`}
+                >
                   <p className="text-xs uppercase tracking-wider text-[#af272f]">
                     Offline / hiba
                   </p>
                   <p className="mt-2 text-3xl font-bold text-[#af272f]">
                     {stats.offline}
                   </p>
-                </div>
+                </button>
                 <div className="rounded-2xl border border-[#073a59]/20 bg-[#073a59]/10 p-4 shadow-sm">
                   <p className="text-xs uppercase tracking-wider text-[#073a59]">
                     Átlag válaszidő
@@ -1019,17 +1172,18 @@ export const MonitorPage: React.FC = () => {
                         <tbody
                           className={`divide-y divide-slate-100 transition-opacity ${isSorting ? "opacity-60" : "opacity-100"}`}
                         >
-                          {sortedActiveSites.length === 0 ? (
+                          {sortedSites.length === 0 ? (
                             <tr>
                               <td
                                 colSpan={7}
                                 className="px-4 py-10 text-center text-slate-500"
                               >
-                                Nincs megjeleníthető aktív monitor.
+                                Nincs megjeleníthető monitor a kiválasztott
+                                szűrőben.
                               </td>
                             </tr>
                           ) : (
-                            sortedActiveSites.map((m) => {
+                            sortedSites.map((m) => {
                               const rowRefreshing =
                                 isRowRefreshing(m.id) ||
                                 isRowRefreshingLight(m.id) ||
@@ -1186,31 +1340,6 @@ export const MonitorPage: React.FC = () => {
                       </table>
                     </div>
                   )}
-
-                  {inactiveSites.length > 0 && (
-                    <div className="border-t border-slate-200 p-4">
-                      <p className="text-xs uppercase tracking-wider text-slate-500 mb-3">
-                        Inaktív monitorok ({inactiveSites.length})
-                      </p>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {inactiveSites.map((m) => (
-                          <button
-                            type="button"
-                            key={m.id}
-                            onClick={() => startEditMonitor(m)}
-                            className="text-left rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 hover:bg-slate-100 transition"
-                          >
-                            <p className="text-sm font-semibold text-slate-700 truncate">
-                              {m.name || safeHost(m.url)}
-                            </p>
-                            <p className="text-xs text-slate-500 truncate">
-                              {m.url}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="space-y-6">
@@ -1336,24 +1465,36 @@ export const MonitorPage: React.FC = () => {
                             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                               Válaszidő grafikon
                             </p>
-                            <select
-                              value={detailChartRange}
-                              onChange={(e) =>
-                                setDetailChartRange(
-                                  e.target.value as ChartRange,
-                                )
-                              }
-                              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
-                            >
-                              {chartRangeOptions.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                  {opt.label}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={detailChartRange}
+                                onChange={(e) =>
+                                  setDetailChartRange(
+                                    e.target.value as ChartRange,
+                                  )
+                                }
+                                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                              >
+                                {responseChartRangeOptions.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedPanel("detailResponse")
+                                }
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                              >
+                                <FiMaximize2 className="h-3.5 w-3.5" />
+                                Nagyban
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="mt-3 h-40">
+                          <div className="mt-3 h-48">
                             {selectedMonitorLogsLoading ? (
                               <div className="h-full flex items-center justify-center">
                                 <ClipLoader color={BRAND_BLUE} size={24} />
@@ -1370,8 +1511,19 @@ export const MonitorPage: React.FC = () => {
                                     stroke="#e2e8f0"
                                   />
                                   <XAxis
-                                    dataKey="idopont"
+                                    dataKey="timestamp"
+                                    type="number"
+                                    scale="time"
+                                    domain={["dataMin", "dataMax"]}
+                                    tickFormatter={(value) =>
+                                      formatResponseTick(
+                                        Number(value),
+                                        detailChartRange,
+                                      )
+                                    }
                                     tick={{ fontSize: 10, fill: "#64748b" }}
+                                    interval="preserveStartEnd"
+                                    minTickGap={36}
                                   />
                                   <YAxis
                                     tick={{ fontSize: 10, fill: "#64748b" }}
@@ -1382,12 +1534,13 @@ export const MonitorPage: React.FC = () => {
                                       `${value} ms`,
                                       "Válaszidő",
                                     ]}
-                                    labelFormatter={(label) =>
-                                      `Időpont: ${label}`
-                                    }
+                                    labelFormatter={(_label, payload: any) => {
+                                      const point = payload?.[0]?.payload;
+                                      return `Időpont: ${point?.tooltipLabel ?? "-"}`;
+                                    }}
                                   />
                                   <Line
-                                    type="monotone"
+                                    type="linear"
                                     dataKey="valaszido"
                                     stroke={BRAND_BLUE}
                                     strokeWidth={2}
@@ -1399,10 +1552,50 @@ export const MonitorPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <ActivityHeatmap
-                          logs={selectedMonitorLogs}
-                          title="Kiesési aktivitás (GitHub stílus)"
-                        />
+                        <div className="rounded-xl border border-slate-200 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                              Kimaradások
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedPanel("detailHeatmap")
+                                }
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                              >
+                                <FiMaximize2 className="h-3.5 w-3.5" />
+                                Nagyban
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {heatmapRangeOptions.map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => setDetailHeatmapRange(opt.value)}
+                                className={`rounded-lg border px-2 py-1 text-xs transition ${
+                                  detailHeatmapRange === opt.value
+                                    ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                                    : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="mt-2">
+                            <ActivityHeatmap
+                              logs={selectedMonitorLogs}
+                              title="Kimaradások"
+                              range={detailHeatmapRange}
+                            />
+                          </div>
+                        </div>
 
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -1426,44 +1619,50 @@ export const MonitorPage: React.FC = () => {
                     )}
                   </div>
 
-                  <form
-                    onSubmit={handleAdd}
-                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="h-7 w-7 rounded-full flex items-center justify-center text-white"
-                        style={{ backgroundColor: BRAND_BLUE }}
-                      >
-                        <FiPlus className="h-4 w-4" />
-                      </div>
-                      <h3 className="text-base font-bold text-slate-900">
-                        Új monitor hozzáadása
-                      </h3>
-                    </div>
-                    <input
-                      type="text"
-                      value={newUrl}
-                      onChange={(e) => setNewUrl(e.target.value)}
-                      required
-                      placeholder="https://pelda.hu"
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      placeholder="Név (opcionális)"
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
-                    />
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
                     <button
-                      type="submit"
-                      className="w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition"
-                      style={{ backgroundColor: BRAND_BLUE }}
+                      type="button"
+                      onClick={() => setAddMonitorOpen((v) => !v)}
+                      className="w-full inline-flex items-center justify-between rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition"
                     >
-                      Hozzáadás
+                      <span className="inline-flex items-center gap-2">
+                        <FiPlus className="h-4 w-4" />
+                        Új monitor hozzáadása
+                      </span>
+                      {addMonitorOpen ? (
+                        <FiChevronUp className="h-4 w-4" />
+                      ) : (
+                        <FiChevronDown className="h-4 w-4" />
+                      )}
                     </button>
-                  </form>
+
+                    {addMonitorOpen && (
+                      <form onSubmit={handleAdd} className="space-y-3">
+                        <input
+                          type="text"
+                          value={newUrl}
+                          onChange={(e) => setNewUrl(e.target.value)}
+                          required
+                          placeholder="https://pelda.hu"
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
+                        />
+                        <input
+                          type="text"
+                          value={newName}
+                          onChange={(e) => setNewName(e.target.value)}
+                          placeholder="Név (opcionális)"
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
+                        />
+                        <button
+                          type="submit"
+                          className="w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition"
+                          style={{ backgroundColor: BRAND_BLUE }}
+                        >
+                          Hozzáadás
+                        </button>
+                      </form>
+                    )}
+                  </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                     <p className="text-xs uppercase tracking-wider text-slate-500">
@@ -1514,9 +1713,7 @@ export const MonitorPage: React.FC = () => {
                       onChange={(e) => setGlobalLogsScope(e.target.value)}
                       className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
                     >
-                      <option value="all">
-                        Összes monitor (max {GLOBAL_LOGS_SITE_CAP})
-                      </option>
+                      <option value="all">Összes monitor</option>
                       {sites.map((site) => (
                         <option key={site.id} value={String(site.id)}>
                           {site.name || safeHost(site.url)}
@@ -1531,7 +1728,7 @@ export const MonitorPage: React.FC = () => {
                       }
                       className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
                     >
-                      {chartRangeOptions.map((opt) => (
+                      {globalChartRangeOptions.map((opt) => (
                         <option key={opt.value} value={opt.value}>
                           Grafikon: {opt.label}
                         </option>
@@ -1552,13 +1749,6 @@ export const MonitorPage: React.FC = () => {
                   </button>
                 </div>
 
-                {globalLogsScope === "all" && (
-                  <p className="mt-3 text-xs text-slate-500">
-                    Az összesített nézet a legutóbb ellenőrzött{" "}
-                    {GLOBAL_LOGS_SITE_CAP} aktív monitor naplóit gyűjti.
-                  </p>
-                )}
-
                 {globalLogsError && (
                   <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                     {globalLogsError}
@@ -1567,10 +1757,20 @@ export const MonitorPage: React.FC = () => {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Kimaradási trend
-                </p>
-                <div className="mt-3 h-56">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Kimaradási trend
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedPanel("globalTrend")}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                  >
+                    <FiMaximize2 className="h-3.5 w-3.5" />
+                    Nagyban
+                  </button>
+                </div>
+                <div className="mt-3 h-64">
                   {globalLogsLoading ? (
                     <div className="h-full flex items-center justify-center">
                       <ClipLoader color={BRAND_BLUE} size={28} />
@@ -1586,6 +1786,8 @@ export const MonitorPage: React.FC = () => {
                         <XAxis
                           dataKey="datum"
                           tick={{ fontSize: 10, fill: "#64748b" }}
+                          interval="preserveStartEnd"
+                          minTickGap={28}
                         />
                         <YAxis
                           tick={{ fontSize: 10, fill: "#64748b" }}
@@ -1594,7 +1796,7 @@ export const MonitorPage: React.FC = () => {
                         <Tooltip />
                         <Legend />
                         <Line
-                          type="monotone"
+                          type="linear"
                           dataKey="figyelmeztetes"
                           name="Figyelmeztetés"
                           stroke="#f59e0b"
@@ -1602,7 +1804,7 @@ export const MonitorPage: React.FC = () => {
                           dot={false}
                         />
                         <Line
-                          type="monotone"
+                          type="linear"
                           dataKey="kimaradas"
                           name="Kimaradás"
                           stroke={BRAND_RED}
@@ -1615,10 +1817,49 @@ export const MonitorPage: React.FC = () => {
                 </div>
               </div>
 
-              <ActivityHeatmap
-                logs={globalFilteredLogs}
-                title="Rendszerszintű aktivitás (GitHub stílus)"
-              />
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Kimaradások
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedPanel("globalHeatmap")}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                  >
+                    <FiMaximize2 className="h-3.5 w-3.5" />
+                    Nagyban
+                  </button>
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {heatmapRangeOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setGlobalHeatmapRange(opt.value)}
+                      className={`rounded-lg border px-2 py-1 text-xs transition ${
+                        globalHeatmapRange === opt.value
+                          ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                          : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-2">
+                  <ActivityHeatmap
+                    logs={globalFilteredLogs}
+                    title="Kimaradások"
+                    range={globalHeatmapRange}
+                    onCellClick={(log) =>
+                      handleSelectGlobalLog(log as GlobalLogEntry)
+                    }
+                  />
+                </div>
+              </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="border-b border-slate-200 px-4 py-3">
@@ -1627,11 +1868,27 @@ export const MonitorPage: React.FC = () => {
                   </p>
                 </div>
 
+                {selectedGlobalLogKey && (
+                  <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+                    <span>
+                      Kijelölt log:{" "}
+                      {selectedGlobalLog?.monitor_name || "ismeretlen monitor"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGlobalLogKey(null)}
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                    >
+                      Szűrés törlése
+                    </button>
+                  </div>
+                )}
+
                 {globalLogsLoading ? (
                   <div className="py-14 flex items-center justify-center">
                     <ClipLoader color={BRAND_BLUE} size={28} />
                   </div>
-                ) : globalFilteredLogs.length === 0 ? (
+                ) : globalLogsForTable.length === 0 ? (
                   <div className="py-12 text-center text-sm text-slate-500">
                     Nincs megjeleníthető globális naplóbejegyzés.
                   </div>
@@ -1648,13 +1905,16 @@ export const MonitorPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {globalFilteredLogs.slice(0, 1200).map((log) => {
+                        {globalLogsForTable.map((log) => {
                           const hasError =
                             !log.status_code || log.status_code >= 400;
+                          const rowKey = getGlobalLogKey(log);
+                          const selectedRow = rowKey === selectedGlobalLogKey;
                           return (
                             <tr
-                              key={`${log.monitor_id}-${log.id}`}
-                              className="hover:bg-slate-50"
+                              key={rowKey}
+                              onClick={() => handleSelectGlobalLog(log)}
+                              className={`cursor-pointer hover:bg-slate-50 ${selectedRow ? "bg-[#073a59]/10" : ""}`}
                             >
                               <td className="px-4 py-3 text-xs text-slate-600 font-mono">
                                 {formatDateTimeHu(
@@ -1711,6 +1971,275 @@ export const MonitorPage: React.FC = () => {
           )}
         </main>
       </div>
+
+      {expandedPanel && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm"
+          onClick={() => setExpandedPanel(null)}
+        >
+          <div
+            className="flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-3">
+              <h3 className="text-sm font-semibold text-slate-900">
+                {expandedPanel === "detailResponse" &&
+                  "Válaszidő grafikon - nagy nézet"}
+                {expandedPanel === "detailHeatmap" &&
+                  "Kimaradások - nagy nézet"}
+                {expandedPanel === "globalTrend" &&
+                  "Globális kimaradási trend - nagy nézet"}
+                {expandedPanel === "globalHeatmap" &&
+                  "Globális kimaradások - nagy nézet"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setExpandedPanel(null)}
+                className="rounded-full p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-800"
+              >
+                <FiX className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="border-b border-slate-200 bg-white px-5 py-3 space-y-2">
+              {isDetailExpanded && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedPanel("detailResponse")}
+                    className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+                      expandedPanel === "detailResponse"
+                        ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Válaszidő
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedPanel("detailHeatmap")}
+                    className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+                      expandedPanel === "detailHeatmap"
+                        ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Kimaradások
+                  </button>
+                </div>
+              )}
+
+              {isGlobalExpanded && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedPanel("globalTrend")}
+                    className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+                      expandedPanel === "globalTrend"
+                        ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Kimaradási trend
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedPanel("globalHeatmap")}
+                    className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+                      expandedPanel === "globalHeatmap"
+                        ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Kimaradások
+                  </button>
+                </div>
+              )}
+
+              {(expandedPanel === "detailResponse" ||
+                expandedPanel === "globalTrend") && (
+                <select
+                  value={
+                    expandedPanel === "detailResponse"
+                      ? detailChartRange
+                      : globalChartRange
+                  }
+                  onChange={(e) => {
+                    const next = e.target.value as ChartRange;
+                    if (expandedPanel === "detailResponse") {
+                      setDetailChartRange(next);
+                    } else {
+                      setGlobalChartRange(next);
+                    }
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                >
+                  {(expandedPanel === "detailResponse"
+                    ? responseChartRangeOptions
+                    : globalChartRangeOptions
+                  ).map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {(expandedPanel === "detailHeatmap" ||
+                expandedPanel === "globalHeatmap") && (
+                <div className="flex flex-wrap gap-1.5">
+                  {heatmapRangeOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        if (expandedPanel === "detailHeatmap") {
+                          setDetailHeatmapRange(opt.value);
+                        } else {
+                          setGlobalHeatmapRange(opt.value);
+                        }
+                      }}
+                      className={`rounded-lg border px-2 py-1 text-xs transition ${
+                        (expandedPanel === "detailHeatmap"
+                          ? detailHeatmapRange
+                          : globalHeatmapRange) === opt.value
+                          ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                          : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-auto p-5">
+              {expandedPanel === "detailResponse" && (
+                <div className="h-full min-h-[420px]">
+                  {selectedMonitorLogsLoading ? (
+                    <div className="flex h-full items-center justify-center">
+                      <ClipLoader color={BRAND_BLUE} size={30} />
+                    </div>
+                  ) : detailResponseChartData.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                      Nincs elegendő adat a grafikonhoz.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={detailResponseChartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis
+                          dataKey="timestamp"
+                          type="number"
+                          scale="time"
+                          domain={["dataMin", "dataMax"]}
+                          tickFormatter={(value) =>
+                            formatResponseTick(Number(value), detailChartRange)
+                          }
+                          tick={{ fontSize: 11, fill: "#64748b" }}
+                          interval="preserveStartEnd"
+                          minTickGap={40}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 11, fill: "#64748b" }}
+                          width={50}
+                        />
+                        <Tooltip
+                          formatter={(value: any) => [
+                            `${value} ms`,
+                            "Válaszidő",
+                          ]}
+                          labelFormatter={(_label, payload: any) => {
+                            const point = payload?.[0]?.payload;
+                            return `Időpont: ${point?.tooltipLabel ?? "-"}`;
+                          }}
+                        />
+                        <Line
+                          type="linear"
+                          dataKey="valaszido"
+                          stroke={BRAND_BLUE}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              )}
+
+              {expandedPanel === "detailHeatmap" && (
+                <ActivityHeatmap
+                  logs={selectedMonitorLogs}
+                  title="Kimaradások"
+                  range={detailHeatmapRange}
+                  cellSize="lg"
+                />
+              )}
+
+              {expandedPanel === "globalTrend" && (
+                <div className="h-full min-h-[420px]">
+                  {globalLogsLoading ? (
+                    <div className="flex h-full items-center justify-center">
+                      <ClipLoader color={BRAND_BLUE} size={30} />
+                    </div>
+                  ) : globalOutageChartData.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                      Nincs adat a globális grafikonhoz.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={globalOutageChartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis
+                          dataKey="datum"
+                          tick={{ fontSize: 11, fill: "#64748b" }}
+                          interval="preserveStartEnd"
+                          minTickGap={34}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 11, fill: "#64748b" }}
+                          width={50}
+                        />
+                        <Tooltip />
+                        <Legend />
+                        <Line
+                          type="linear"
+                          dataKey="figyelmeztetes"
+                          name="Figyelmeztetés"
+                          stroke="#f59e0b"
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                        <Line
+                          type="linear"
+                          dataKey="kimaradas"
+                          name="Kimaradás"
+                          stroke={BRAND_RED}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              )}
+
+              {expandedPanel === "globalHeatmap" && (
+                <ActivityHeatmap
+                  logs={globalFilteredLogs}
+                  title="Kimaradások"
+                  range={globalHeatmapRange}
+                  cellSize="lg"
+                  onCellClick={(log) =>
+                    handleSelectGlobalLog(log as GlobalLogEntry)
+                  }
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {logModalMonitor && (
         <LogsModal

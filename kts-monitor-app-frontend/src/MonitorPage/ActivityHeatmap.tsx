@@ -1,17 +1,27 @@
 import React, { useMemo } from "react";
 import { MonitorLog } from "./MonitorTypes.ts";
-import { formatDateTimeHu, parseMonitorDate } from "./timeUtils.ts";
+import { parseMonitorDate } from "./timeUtils.ts";
+
+type HeatmapLog = MonitorLog & {
+  monitor_name?: string;
+  monitor_url?: string;
+};
 
 type Props = {
-  logs: MonitorLog[];
+  logs: HeatmapLog[];
   title: string;
-  days?: number;
+  range: HeatmapRange;
+  cellSize?: "sm" | "lg";
+  onCellClick?: (log: HeatmapLog) => void;
 };
+
+export type HeatmapRange = "6h" | "12h" | "24h" | "48h" | "7d" | "14d";
 
 type Cell = {
   key: string;
   label: string;
   level: 0 | 1 | 2 | 3;
+  log: HeatmapLog;
 };
 
 const levelColor: Record<Cell["level"], string> = {
@@ -31,41 +41,55 @@ const getLogLevel = (log: MonitorLog): Cell["level"] => {
 export const ActivityHeatmap: React.FC<Props> = ({
   logs,
   title,
-  days = 84,
+  range,
+  cellSize = "sm",
+  onCellClick,
 }) => {
   const cells = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = Date.now();
+    const isHourRange = range.endsWith("h");
+    const amount = isHourRange
+      ? Number.parseInt(range.replace("h", ""), 10)
+      : Number.parseInt(range.replace("d", ""), 10);
+    const rangeMs = isHourRange
+      ? amount * 60 * 60 * 1000
+      : amount * 24 * 60 * 60 * 1000;
+    const start = now - rangeMs;
 
-    const levelByDay = new Map<string, Cell["level"]>();
+    return [...logs]
+      .map((log) => {
+        const date = parseMonitorDate(log.checked_at || log.created_at);
+        return {
+          log,
+          date,
+          ts: date?.getTime() ?? 0,
+        };
+      })
+      .filter((x) => x.date && x.ts >= start && x.ts <= now)
+      .sort((a, b) => a.ts - b.ts)
+      .map((entry) => {
+        const dateLabel = entry.date
+          ? entry.date.toLocaleString("hu-HU", {
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "Nincs időpont";
+        const monitorLabel = entry.log.monitor_name
+          ? ` | ${entry.log.monitor_name}`
+          : "";
+        const statusLabel = ` | HTTP ${entry.log.status_code ?? "HIBA"}`;
 
-    logs.forEach((log) => {
-      const date = parseMonitorDate(log.checked_at || log.created_at);
-      if (!date) return;
-
-      const day = new Date(date);
-      day.setHours(0, 0, 0, 0);
-      const key = day.toISOString().slice(0, 10);
-      const current = levelByDay.get(key) ?? 0;
-      const next = getLogLevel(log);
-      levelByDay.set(key, Math.max(current, next) as Cell["level"]);
-    });
-
-    const result: Cell[] = [];
-    for (let i = days - 1; i >= 0; i -= 1) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      const level = levelByDay.get(key) ?? 0;
-      result.push({
-        key,
-        level,
-        label: formatDateTimeHu(d.toISOString()),
+        return {
+          key: `${entry.log.id}-${entry.ts}`,
+          level: getLogLevel(entry.log),
+          label: `${dateLabel}${monitorLabel}${statusLabel}`,
+          log: entry.log,
+        };
       });
-    }
-
-    return result;
-  }, [logs, days]);
+  }, [logs, range]);
+  const columns = cellSize === "lg" ? 36 : 28;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -73,15 +97,25 @@ export const ActivityHeatmap: React.FC<Props> = ({
         {title}
       </p>
 
-      <div className="mt-3 grid grid-cols-14 gap-1">
-        {cells.map((cell) => (
-          <div
-            key={cell.key}
-            title={`${cell.key}`}
-            className="h-3.5 w-3.5 rounded-[2px] border border-white"
-            style={{ backgroundColor: levelColor[cell.level] }}
-          />
-        ))}
+      <div className="mt-3">
+        <div
+          className="grid gap-1"
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        >
+          {cells.map((cell) => (
+            <div
+              key={cell.key}
+              title={cell.label}
+              onClick={onCellClick ? () => onCellClick(cell.log) : undefined}
+              className={`aspect-square rounded-[2px] border border-white ${
+                onCellClick
+                  ? "cursor-pointer hover:ring-1 hover:ring-slate-400"
+                  : ""
+              }`}
+              style={{ backgroundColor: levelColor[cell.level] }}
+            />
+          ))}
+        </div>
       </div>
 
       <div className="mt-2 flex items-center justify-end gap-2 text-[10px] text-slate-500">
