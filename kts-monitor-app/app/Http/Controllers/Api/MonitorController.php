@@ -101,16 +101,16 @@ class MonitorController extends Controller
         ]);
     }
 
-	// POST /api/sites/check-all-light (light, always runs - ignore interval)
-	public function checkAllLight()
-	{
-		Artisan::call('sites:check-light', ['--force' => true]);
+    // POST /api/sites/check-all-light (light, always runs - ignore interval)
+    public function checkAllLight()
+    {
+        Artisan::call('sites:check-light', ['--force' => true]);
 
-		return response()->json([
-			'message' => 'All sites light-checked',
-			'data' => Monitor::orderBy('name')->get(),
-		]);
-	}
+        return response()->json([
+            'message' => 'All sites light-checked',
+            'data' => Monitor::orderBy('name')->get(),
+        ]);
+    }
 
     // POST /api/sites/{id}/check
     public function checkOne(int $id)
@@ -253,20 +253,27 @@ class MonitorController extends Controller
         $statusCode = 0;
         $responseTime = null;
         $error = null;
+        $redirectCount = 0;
 
         try {
             $start = microtime(true);
-            $response = Http::timeout(10)
+            $response = Http::connectTimeout(CheckSitesLight::CONNECT_TIMEOUT_SECONDS)
+                ->timeout(CheckSitesLight::REQUEST_TIMEOUT_SECONDS)
+                ->withOptions([
+                    'allow_redirects' => [
+                        'max' => 5,
+                        'track_redirects' => true,
+                    ],
+                ])
                 ->withHeaders(['User-Agent' => CheckSitesLight::USER_AGENT])
                 ->head($monitor->url);
 
             $statusCode = $response->status();
 
-            if ($statusCode === 405) {
-                $response = Http::timeout(10)
-                    ->withHeaders(['User-Agent' => CheckSitesLight::USER_AGENT])
-                    ->get($monitor->url);
-                $statusCode = $response->status();
+            $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+            if ($redirectHistory !== null) {
+                $redirectUrls = array_filter(explode(', ', $redirectHistory));
+                $redirectCount = count($redirectUrls);
             }
         } catch (\Exception $e) {
             $error = $e->getMessage();
@@ -286,6 +293,7 @@ class MonitorController extends Controller
         $monitor->update([
             'last_status' => $statusCode,
             'last_response_time_ms' => $responseTime,
+            'redirect_count' => $redirectCount,
             'last_checked_at' => now(),
         ]);
 

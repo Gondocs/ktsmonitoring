@@ -14,6 +14,8 @@ class CheckSitesLight extends Command
     protected $description = 'Gyors rendelkezésre állás ellenőrzés (HEAD request only)';
 
     const USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
+    const CONNECT_TIMEOUT_SECONDS = 3;
+    const REQUEST_TIMEOUT_SECONDS = 6;
 
     public function handle()
     {
@@ -44,13 +46,27 @@ class CheckSitesLight extends Command
             $start = microtime(true);
             $statusCode = 0;
             $error = null;
+            $redirectCount = 0;
 
             try {
-                $response = Http::timeout(10)
+                $response = Http::connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
+                    ->timeout(self::REQUEST_TIMEOUT_SECONDS)
+                    ->withOptions([
+                        'allow_redirects' => [
+                            'max' => 5,
+                            'track_redirects' => true,
+                        ],
+                    ])
                     ->withHeaders(['User-Agent' => self::USER_AGENT])
                     ->head($monitor->url);
 
                 $statusCode = $response->status();
+
+                $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+                if ($redirectHistory !== null) {
+                    $redirectUrls = array_filter(explode(', ', $redirectHistory));
+                    $redirectCount = count($redirectUrls);
+                }
 
                 // Megpróbálom ez nélkü, hogy futnak-e problémák a HEAD kéréssel
                 /*
@@ -83,6 +99,7 @@ class CheckSitesLight extends Command
             $monitor->update([
                 'last_status' => $statusCode,
                 'last_response_time_ms' => $responseTime,
+                'redirect_count' => $redirectCount,
                 'last_checked_at' => now(),
             ]);
 

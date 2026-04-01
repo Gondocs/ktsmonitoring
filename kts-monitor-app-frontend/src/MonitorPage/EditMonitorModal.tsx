@@ -36,27 +36,27 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl overflow-hidden"
+        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-slate-50 truncate">
+            <h2 className="text-lg font-semibold text-slate-900 truncate">
               Monitor szerkesztése
             </h2>
-            <p className="text-xs text-slate-400 mt-1 truncate">
+            <p className="text-xs text-slate-500 mt-1 truncate">
               {monitor.name || monitor.url}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex items-center justify-center rounded-full p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition"
+            className="inline-flex items-center justify-center rounded-full p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-200 transition"
           >
             <FiX className="h-5 w-5" />
           </button>
@@ -66,7 +66,7 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
           {/* URL */}
           <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-600">
               Célpont URL
             </label>
             <input
@@ -74,18 +74,18 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
               value={editUrl}
               onChange={(e) => setEditUrl(e.target.value)}
               placeholder="https://pelda.hu"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-ktsRed focus:border-ktsRed"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none"
             />
             <p className="text-[10px] text-slate-500">
               Ha nem adsz meg protokollt, automatikusan{" "}
-              <span className="font-mono text-slate-300">https://</span>-re
+              <span className="font-mono text-slate-700">https://</span>-re
               egészül ki.
             </p>
           </div>
 
           {/* Name */}
           <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-600">
               Megjelenített név
             </label>
             <input
@@ -93,7 +93,7 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               placeholder="Opcinális név"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-ktsRed focus:border-ktsRed"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none"
             />
             <p className="text-[10px] text-slate-500">
               Ha üresen hagyod, a rendszer az URL-t jeleníti meg névként.
@@ -101,12 +101,12 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
           </div>
 
           {/* Active toggle */}
-          <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
             <div className="space-y-0.5">
-              <p className="text-xs font-semibold text-slate-100 uppercase tracking-wide">
+              <p className="text-xs font-semibold text-slate-800 uppercase tracking-wide">
                 Monitorozás státusz
               </p>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-slate-500">
                 Ha inaktívra állítod, a rendszer nem fogja automatikusan
                 ellenőrizni ezt a weboldalt.
               </p>
@@ -114,7 +114,7 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
             <button
               type="button"
               onClick={() => setEditIsActive(!editIsActive)}
-              className="ml-4 inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs font-medium text-slate-100 hover:border-ktsRed hover:text-ktsRed transition"
+              className="ml-4 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-[#073a59] hover:text-[#073a59] transition"
             >
               {editIsActive ? (
                 <>
@@ -135,7 +135,7 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 transition"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition"
               disabled={editSaving}
             >
               Mégse
@@ -143,7 +143,7 @@ export const EditMonitorModal: React.FC<EditMonitorModalProps> = ({
             <button
               type="submit"
               disabled={editSaving}
-              className="inline-flex items-center gap-2 rounded-lg bg-ktsRed px-5 py-1.5 text-xs font-semibold text-white shadow-md shadow-ktsRed/30 hover:bg-ktsLightRed transition disabled:opacity-60 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#073a59] px-5 py-1.5 text-xs font-semibold text-white hover:bg-[#0a4c73] transition disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {editSaving ? (
                 <>

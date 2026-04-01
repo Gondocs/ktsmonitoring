@@ -89,7 +89,7 @@ export const MonitorPage: React.FC = () => {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [intervalMinutes, setIntervalMinutesState] = useState<number | null>(
-    null
+    null,
   );
   const [intervalLoading, setIntervalLoading] = useState(false);
   const [intervalSaving, setIntervalSaving] = useState(false);
@@ -149,7 +149,7 @@ export const MonitorPage: React.FC = () => {
     } catch (err: any) {
       alert(
         err.message ||
-          "Nem sikerült light ellenőrzést futtatni az összes weboldalra."
+          "Nem sikerült light ellenőrzést futtatni az összes weboldalra.",
       );
     } finally {
       setRefreshingLight(false);
@@ -175,7 +175,7 @@ export const MonitorPage: React.FC = () => {
       await loadSites();
     } catch (err: any) {
       alert(
-        err.message || "Nem sikerült light ellenőrzést futtatni a weboldalra."
+        err.message || "Nem sikerült light ellenőrzést futtatni a weboldalra.",
       );
     } finally {
       setRefreshingLightIds((prev) => prev.filter((x) => x !== id));
@@ -205,7 +205,7 @@ export const MonitorPage: React.FC = () => {
   const handleDelete = async (id: number) => {
     if (
       !window.confirm(
-        "Biztosan törölni szeretnéd ezt a monitorozott weboldalt?"
+        "Biztosan törölni szeretnéd ezt a monitorozott weboldalt?",
       )
     )
       return;
@@ -249,7 +249,7 @@ export const MonitorPage: React.FC = () => {
     if (!logModalMonitor) return;
     if (
       !window.confirm(
-        "Biztosan törölni szeretnéd az összes naplóbejegyzést ehhez a weboldalhoz?"
+        "Biztosan törölni szeretnéd az összes naplóbejegyzést ehhez a weboldalhoz?",
       )
     ) {
       return;
@@ -342,7 +342,7 @@ export const MonitorPage: React.FC = () => {
       alert("Napló megőrzési idő sikeresen frissítve.");
     } catch (err: any) {
       alert(
-        err.message || "Nem sikerült menteni a napló megőrzési beállítást."
+        err.message || "Nem sikerült menteni a napló megőrzési beállítást.",
       );
     } finally {
       setLogRetentionSaving(false);
@@ -352,7 +352,7 @@ export const MonitorPage: React.FC = () => {
   const handleDeleteAllLogs = async () => {
     if (
       !window.confirm(
-        "Biztosan törölni szeretnéd az ÖSSZES naplóbejegyzést MINDEN weboldalhoz? Ez a művelet nem vonható vissza."
+        "Biztosan törölni szeretnéd az ÖSSZES naplóbejegyzést MINDEN weboldalhoz? Ez a művelet nem vonható vissza.",
       )
     ) {
       return;
@@ -454,7 +454,7 @@ export const MonitorPage: React.FC = () => {
             <img
               src="/ktsonlinelogo.png"
               alt="KTS Online logó"
-              className="h-10 w-auto drop-shadow-md"
+              className="h-auto md:h-[200px] w-auto drop-shadow-md"
             />
             <div className="flex flex-col leading-tight">
               <span className="text-[10px] uppercase tracking-[0.25em] text-slate-400">
@@ -737,8 +737,8 @@ export const MonitorPage: React.FC = () => {
                                         m.stability_score >= 95
                                           ? "bg-green-500"
                                           : m.stability_score >= 85
-                                          ? "bg-yellow-500"
-                                          : "bg-red-500"
+                                            ? "bg-yellow-500"
+                                            : "bg-red-500"
                                       }`}
                                       style={{ width: `${m.stability_score}%` }}
                                     />
@@ -939,7 +939,7 @@ export const MonitorPage: React.FC = () => {
                           {m.last_checked_at
                             ? new Date(m.last_checked_at).toLocaleTimeString(
                                 [],
-                                { hour: "2-digit", minute: "2-digit" }
+                                { hour: "2-digit", minute: "2-digit" },
                               )
                             : "-"}
                         </div>
@@ -1232,7 +1232,8 @@ export const MonitorPage: React.FC = () => {
                 <div className="h-full w-full flex flex-col">
                   <div className="px-6 pt-4 pb-2 text-xs text-slate-400 flex justify-between items-center">
                     <span>
-                      Válaszidő alakulása (ms) az utolsó {logs.length} mérés alapján.
+                      Válaszidő alakulása (ms) az utolsó {logs.length} mérés
+                      alapján.
                     </span>
                     <span className="flex items-center gap-3 text-[10px] text-slate-500">
                       <span className="flex items-center gap-1">
@@ -1259,7 +1260,8 @@ export const MonitorPage: React.FC = () => {
                             // X tengelyre egy olvasható idő string
                             // + 1 óra hozzáadása a téli idő miatt
                             timeLabel: new Date(
-                              (new Date(l.checked_at || l.created_at)).getTime() + 3600000
+                              new Date(l.checked_at || l.created_at).getTime() +
+                                3600000,
                             ).toLocaleTimeString("hu-HU", {
                               hour: "2-digit",
                               minute: "2-digit",
@@ -1270,10 +1272,10 @@ export const MonitorPage: React.FC = () => {
                               l.response_time_ms! > 5000
                                 ? "slow"
                                 : l.response_time_ms! > 1000
-                                ? "medium"
-                                : "fast",
+                                  ? "medium"
+                                  : "fast",
                           }))
-                        .reverse()}
+                          .reverse()}
                         margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
@@ -1300,8 +1302,8 @@ export const MonitorPage: React.FC = () => {
                               bucket === "slow"
                                 ? "> 5000ms"
                                 : bucket === "medium"
-                                ? "1001–5000ms"
-                                : "<= 1000ms";
+                                  ? "1001–5000ms"
+                                  : "<= 1000ms";
                             return [`${rt} ms`, label];
                           }}
                         />
@@ -1354,7 +1356,7 @@ export const MonitorPage: React.FC = () => {
                         >
                           <td className="px-6 py-3 whitespace-nowrap text-slate-400 font-mono text-[11px]">
                             {new Date(
-                              log.checked_at || log.created_at
+                              log.checked_at || log.created_at,
                             ).toLocaleString("hu-HU", {
                               month: "short",
                               day: "2-digit",
@@ -1378,8 +1380,8 @@ export const MonitorPage: React.FC = () => {
                                     log.response_time_ms > 5000
                                       ? "text-red-400"
                                       : log.response_time_ms > 1000
-                                      ? "text-orange-400"
-                                      : "text-slate-200"
+                                        ? "text-orange-400"
+                                        : "text-slate-200"
                                   }
                                 >
                                   {log.response_time_ms}
@@ -1497,7 +1499,7 @@ export const MonitorPage: React.FC = () => {
                           value={intervalMinutes ?? ""}
                           onChange={(e) =>
                             setIntervalMinutesState(
-                              e.target.value ? Number(e.target.value) : null
+                              e.target.value ? Number(e.target.value) : null,
                             )
                           }
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none"
@@ -1529,7 +1531,7 @@ export const MonitorPage: React.FC = () => {
                           value={lightIntervalMinutes ?? ""}
                           onChange={(e) =>
                             setLightIntervalMinutes(
-                              e.target.value ? Number(e.target.value) : null
+                              e.target.value ? Number(e.target.value) : null,
                             )
                           }
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none"
@@ -1572,7 +1574,7 @@ export const MonitorPage: React.FC = () => {
                           value={logRetentionDays ?? ""}
                           onChange={(e) =>
                             setLogRetentionDays(
-                              e.target.value ? Number(e.target.value) : null
+                              e.target.value ? Number(e.target.value) : null,
                             )
                           }
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-ktsRed focus:ring-1 focus:ring-ktsRed focus:outline-none"
