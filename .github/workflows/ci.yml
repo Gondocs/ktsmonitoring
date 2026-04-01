@@ -6,6 +6,7 @@ on:
       - main
       - master
   pull_request:
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -29,7 +30,18 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
+      - name: Prepare Laravel test environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+          php artisan config:clear
+
       - name: Run backend tests
+        env:
+          APP_ENV: testing
+          APP_KEY: base64:mbyxnHjFkJ0qJo9TuhAyep5ZO1vG9q8i3TrZMpL1Bxs=
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ":memory:"
         run: php artisan test
 
   frontend:
@@ -50,7 +62,7 @@ jobs:
           cache: npm
           cache-dependency-path: kts-monitor-app-frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: npm ci
 
       - name: Run frontend tests
