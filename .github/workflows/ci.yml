@@ -39,7 +39,6 @@ jobs:
       - name: Run backend tests
         env:
           APP_ENV: testing
-          APP_KEY: base64:mbyxnHjFkJ0qJo9TuhAyep5ZO1vG9q8i3TrZMpL1Bxs=
           DB_CONNECTION: sqlite
           DB_DATABASE: ":memory:"
         run: php artisan test
