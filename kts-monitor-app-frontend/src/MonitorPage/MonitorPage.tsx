@@ -1227,10 +1227,17 @@ export const MonitorPage: React.FC = () => {
                                     </span>
                                   </td>
 
-                                  <td className="px-4 py-3 font-mono text-xs text-slate-700">
-                                    {m.last_response_time_ms != null
-                                      ? `${m.last_response_time_ms} ms`
-                                      : "Nincs adat"}
+                                  <td className="px-4 py-3 text-xs text-slate-700">
+                                    <div className="font-mono">
+                                      {m.last_response_time_ms != null
+                                        ? `${m.last_response_time_ms} ms`
+                                        : "Nincs adat"}
+                                    </div>
+                                    {(m.redirect_count ?? 0) > 0 && (
+                                      <div className="mt-0.5 text-[10px] text-amber-600">
+                                        ↪ {m.redirect_count} átirányítás
+                                      </div>
+                                    )}
                                   </td>
 
                                   <td
@@ -1412,6 +1419,11 @@ export const MonitorPage: React.FC = () => {
                                 ? `${selectedMonitor.last_response_time_ms} ms`
                                 : "Nincs adat"}
                             </p>
+                            {(selectedMonitor.redirect_count ?? 0) > 0 && (
+                              <p className="mt-1 text-[10px] text-amber-600">
+                                ↪ {selectedMonitor.redirect_count} átirányítás
+                              </p>
+                            )}
                           </div>
                           <div className="rounded-xl border border-slate-200 p-3">
                             <p className="text-slate-500">Utolsó ellenőrzés</p>
