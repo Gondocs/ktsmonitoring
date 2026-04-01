@@ -132,6 +132,24 @@ export async function setLightMonitorInterval(interval_minutes: number) {
 	});
 }
 
+export async function getAlertEmailSettings(): Promise<{ recipient_email: string }> {
+	return apiFetch('/settings/alert-email');
+}
+
+export async function setAlertEmailSettings(recipient_email: string) {
+	return apiFetch('/settings/alert-email', {
+		method: 'POST',
+		body: JSON.stringify({ recipient_email }),
+	});
+}
+
+export async function sendAlertTestEmail(recipient_email?: string) {
+	return apiFetch('/settings/alert-email/test', {
+		method: 'POST',
+		body: JSON.stringify(recipient_email ? { recipient_email } : {}),
+	});
+}
+
 export async function getLogRetentionDays(): Promise<{ retention_days: number }> {
 	return apiFetch('/settings/log-retention');
 }

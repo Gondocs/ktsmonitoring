@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Http;
 use App\Models\Monitor;
 use App\Models\MonitorLog;
 use App\Models\Setting;
+use App\Services\OutageAlertService;
 
 class CheckSitesLight extends Command
 {
@@ -41,8 +42,11 @@ class CheckSitesLight extends Command
         }
 
         $this->info('Gyors ellenőrzés indítása ' . count($monitors) . ' monitoron...');
+        $outageAlertService = app(OutageAlertService::class);
 
         foreach ($monitors as $monitor) {
+            /** @var Monitor $monitor */
+            $previousStatus = $monitor->last_status;
             $start = microtime(true);
             $statusCode = 0;
             $error = null;
@@ -102,6 +106,13 @@ class CheckSitesLight extends Command
                 'redirect_count' => $redirectCount,
                 'last_checked_at' => now(),
             ]);
+
+            $outageAlertService->maybeSendOutageAlert(
+                $monitor,
+                $previousStatus,
+                $statusCode,
+                $error
+            );
 
             // Recalculate 24h stability from logs (max 96 entries, >5000ms = failure)
             $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);

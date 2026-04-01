@@ -1,6 +1,6 @@
 // src/MonitorPage/SettingsModal.tsx
 import React from "react";
-import { FiX, FiSave, FiAlertTriangle, FiTrash2 } from "react-icons/fi";
+import { FiX, FiSave, FiAlertTriangle, FiTrash2, FiSend } from "react-icons/fi";
 
 type SettingsModalProps = {
   onClose: () => void;
@@ -19,6 +19,13 @@ type SettingsModalProps = {
   setLogRetentionDays: (value: number | null) => void;
   logRetentionSaving: boolean;
   saveLogRetention: () => void;
+
+  alertRecipientEmail: string;
+  setAlertRecipientEmail: (value: string) => void;
+  alertEmailSaving: boolean;
+  saveAlertEmail: () => void;
+  alertTestSending: boolean;
+  sendAlertTestEmail: () => void;
 
   deletingAllLogs: boolean;
   handleDeleteAllLogs: () => void;
@@ -39,6 +46,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   setLogRetentionDays,
   logRetentionSaving,
   saveLogRetention,
+  alertRecipientEmail,
+  setAlertRecipientEmail,
+  alertEmailSaving,
+  saveAlertEmail,
+  alertTestSending,
+  sendAlertTestEmail,
   deletingAllLogs,
   handleDeleteAllLogs,
 }) => {
@@ -260,6 +273,79 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </>
                     )}
                   </button>
+                </div>
+              </section>
+
+              {/* Alert email */}
+              <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Leállás értesítési email
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Ha egy oldal piros statuszba kerul (pl. 4xx/5xx vagy nem
+                      erheto el), ide automatikusan ertesites megy.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-2 space-y-3">
+                  <input
+                    type="email"
+                    placeholder="pelda@email.hu"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none"
+                    value={alertRecipientEmail}
+                    onChange={(e) => setAlertRecipientEmail(e.target.value)}
+                  />
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={saveAlertEmail}
+                      disabled={
+                        alertEmailSaving ||
+                        !alertRecipientEmail ||
+                        !alertRecipientEmail.includes("@")
+                      }
+                      className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {alertEmailSaving ? (
+                        <>
+                          <span className="h-3.5 w-3.5 border-2 border-slate-300/40 border-t-white rounded-full animate-spin" />
+                          Mentés...
+                        </>
+                      ) : (
+                        <>
+                          <FiSave className="h-3.5 w-3.5" />
+                          Mentés
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={sendAlertTestEmail}
+                      disabled={
+                        alertTestSending ||
+                        !alertRecipientEmail ||
+                        !alertRecipientEmail.includes("@")
+                      }
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {alertTestSending ? (
+                        <>
+                          <span className="h-3.5 w-3.5 border-2 border-slate-300/40 border-t-slate-700 rounded-full animate-spin" />
+                          Teszt kuldes...
+                        </>
+                      ) : (
+                        <>
+                          <FiSend className="h-3.5 w-3.5" />
+                          Teszt email küldése
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </section>
 

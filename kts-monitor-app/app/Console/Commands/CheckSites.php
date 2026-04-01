@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Http;
 use App\Models\Monitor;
 use App\Models\MonitorLog;
 use App\Models\Setting;
+use App\Services\OutageAlertService;
 
 class CheckSites extends Command
 {
@@ -33,12 +34,16 @@ class CheckSites extends Command
         }
 
         $monitors = Monitor::where('is_active', true)->get();
+        $outageAlertService = app(OutageAlertService::class);
 
         foreach ($monitors as $monitor) {
+            /** @var Monitor $monitor */
+            $previousStatus = $monitor->last_status;
             $maxAttempts = 3; // max próbálkozás
             $successCount = 0;
             $statusCodes = [];
             $responseTimes = [];
+            $lastErrorMessage = null;
 
             $sslDaysRemaining = null;
             $sslExpiresAt = null;
@@ -55,7 +60,7 @@ class CheckSites extends Command
 
                 try {
                     $start = microtime(true);
-                    $response = Http::timeout(  10)->withOptions([
+                    $response = Http::timeout(10)->withOptions([
                         'allow_redirects' => [
                             'max' => 10,
                             'track_redirects' => true,
@@ -126,6 +131,7 @@ class CheckSites extends Command
                     }
                 } catch (\Exception $e) {
                     $attemptError = $e->getMessage();
+                    $lastErrorMessage = $attemptError;
                 }
 
                 // Logoljuk az egyes próbálkozásokat
@@ -165,6 +171,13 @@ class CheckSites extends Command
                 'content_last_modified_at' => $contentLastModifiedAt,
                 'last_checked_at' => now(),
             ]);
+
+            $outageAlertService->maybeSendOutageAlert(
+                $monitor,
+                $previousStatus,
+                $avgStatus,
+                $lastErrorMessage
+            );
 
             // Recalculate 24h stability from logs (max 96 entries, >5000ms = failure)
             $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);

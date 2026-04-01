@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Mail\OutageTestMail;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -18,6 +20,10 @@ class SettingsApiTest extends TestCase
 
         $this->getJson('/api/settings/monitor-interval-light')->assertUnauthorized();
         $this->postJson('/api/settings/monitor-interval-light', ['interval_minutes' => 10])->assertUnauthorized();
+
+        $this->getJson('/api/settings/alert-email')->assertUnauthorized();
+        $this->postJson('/api/settings/alert-email', ['recipient_email' => 'gondocs.robert@gmail.com'])->assertUnauthorized();
+        $this->postJson('/api/settings/alert-email/test')->assertUnauthorized();
 
         $this->getJson('/api/settings/log-retention')->assertUnauthorized();
         $this->postJson('/api/settings/log-retention', ['retention_days' => 30])->assertUnauthorized();
@@ -113,5 +119,52 @@ class SettingsApiTest extends TestCase
         $this->postJson('/api/settings/log-retention', ['retention_days' => 366])
             ->assertStatus(422)
             ->assertJsonValidationErrors('retention_days');
+    }
+
+    public function test_alert_email_can_be_read_and_updated(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->getJson('/api/settings/alert-email')
+            ->assertOk()
+            ->assertJson([
+                'recipient_email' => 'gondocs.robert@gmail.com',
+            ]);
+
+        $this->postJson('/api/settings/alert-email', ['recipient_email' => 'alerts@example.com'])
+            ->assertOk()
+            ->assertJson([
+                'recipient_email' => 'alerts@example.com',
+            ]);
+
+        $this->assertDatabaseHas('settings', [
+            'key' => 'alert_email_recipient',
+            'value' => 'alerts@example.com',
+        ]);
+    }
+
+    public function test_alert_email_validation_rules_are_enforced(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->postJson('/api/settings/alert-email', ['recipient_email' => 'invalid-email'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('recipient_email');
+    }
+
+    public function test_test_alert_email_endpoint_sends_email(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        Mail::fake();
+
+        $this->postJson('/api/settings/alert-email/test', ['recipient_email' => 'alerts@example.com'])
+            ->assertOk()
+            ->assertJson([
+                'recipient_email' => 'alerts@example.com',
+            ]);
+
+        Mail::assertSent(OutageTestMail::class, function (OutageTestMail $mail) {
+            return $mail->hasTo('alerts@example.com');
+        });
     }
 }

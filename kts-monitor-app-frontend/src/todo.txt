@@ -1,4 +1,0 @@
-- Jelenlegi URL és nevek szerkesztése
-- Felhasználó létrehozása
-- Routing
-- Tesztek írása

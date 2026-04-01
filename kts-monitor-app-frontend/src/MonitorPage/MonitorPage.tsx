@@ -44,6 +44,9 @@ import {
   setMonitorInterval,
   getLightMonitorInterval,
   setLightMonitorInterval,
+  getAlertEmailSettings,
+  setAlertEmailSettings,
+  sendAlertTestEmail as apiSendAlertTestEmail,
   updateSite,
   deleteSiteLogs,
   getLogRetentionDays,
@@ -304,6 +307,11 @@ export const MonitorPage: React.FC = () => {
   const [lightIntervalSaving, setLightIntervalSaving] = useState(false);
   const [logRetentionDays, setLogRetentionDays] = useState<number | null>(15);
   const [logRetentionSaving, setLogRetentionSaving] = useState(false);
+  const [alertRecipientEmail, setAlertRecipientEmail] = useState(
+    "gondocs.robert@gmail.com",
+  );
+  const [alertEmailSaving, setAlertEmailSaving] = useState(false);
+  const [alertTestSending, setAlertTestSending] = useState(false);
   const [deletingAllLogs, setDeletingAllLogs] = useState(false);
 
   const [editMonitor, setEditMonitor] = useState<Monitor | null>(null);
@@ -759,6 +767,10 @@ export const MonitorPage: React.FC = () => {
       setIntervalMinutesState(data.interval_minutes ?? null);
       const light = await getLightMonitorInterval();
       setLightIntervalMinutes(light.interval_minutes ?? null);
+      const alertEmailSettings = await getAlertEmailSettings();
+      setAlertRecipientEmail(
+        alertEmailSettings.recipient_email ?? "gondocs.robert@gmail.com",
+      );
       const retention = await getLogRetentionDays();
       setLogRetentionDays(retention.retention_days ?? 15);
     } catch (err: any) {
@@ -811,6 +823,37 @@ export const MonitorPage: React.FC = () => {
       );
     } finally {
       setLogRetentionSaving(false);
+    }
+  };
+
+  const saveAlertEmail = async () => {
+    const email = alertRecipientEmail.trim();
+    if (!email || !email.includes("@")) return;
+
+    setAlertEmailSaving(true);
+    try {
+      const data = await setAlertEmailSettings(email);
+      setAlertRecipientEmail(data.recipient_email ?? email);
+      alert("Ertesitesi email sikeresen mentve.");
+    } catch (err: any) {
+      alert(err.message || "Nem sikerult menteni az ertesitesi email cimet.");
+    } finally {
+      setAlertEmailSaving(false);
+    }
+  };
+
+  const sendAlertTestEmail = async () => {
+    const email = alertRecipientEmail.trim();
+    if (!email || !email.includes("@")) return;
+
+    setAlertTestSending(true);
+    try {
+      await apiSendAlertTestEmail(email);
+      alert(`Teszt email elkuldve: ${email}`);
+    } catch (err: any) {
+      alert(err.message || "Nem sikerult teszt emailt kuldeni.");
+    } finally {
+      setAlertTestSending(false);
     }
   };
 
@@ -2285,6 +2328,12 @@ export const MonitorPage: React.FC = () => {
           setLogRetentionDays={setLogRetentionDays}
           logRetentionSaving={logRetentionSaving}
           saveLogRetention={saveLogRetention}
+          alertRecipientEmail={alertRecipientEmail}
+          setAlertRecipientEmail={setAlertRecipientEmail}
+          alertEmailSaving={alertEmailSaving}
+          saveAlertEmail={saveAlertEmail}
+          alertTestSending={alertTestSending}
+          sendAlertTestEmail={sendAlertTestEmail}
           deletingAllLogs={deletingAllLogs}
           handleDeleteAllLogs={handleDeleteAllLogs}
         />

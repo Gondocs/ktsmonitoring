@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Monitor;
 use App\Models\MonitorLog;
 use App\Console\Commands\CheckSitesLight;
+use App\Services\OutageAlertService;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Request;
@@ -116,6 +117,8 @@ class MonitorController extends Controller
     public function checkOne(int $id)
     {
         $monitor = Monitor::findOrFail($id);
+        $previousStatus = $monitor->last_status;
+        $lastErrorMessage = null;
 
         $attempts = 3;
         $successCount = 0;
@@ -186,6 +189,7 @@ class MonitorController extends Controller
                 }
             } catch (\Exception $e) {
                 $attemptError = $e->getMessage();
+                $lastErrorMessage = $attemptError;
             }
 
             MonitorLog::create([
@@ -230,6 +234,13 @@ class MonitorController extends Controller
             'last_checked_at' => now(),
         ]);
 
+        app(OutageAlertService::class)->maybeSendOutageAlert(
+            $monitor,
+            $previousStatus,
+            $avgStatus,
+            $lastErrorMessage
+        );
+
         // Recalculate 24h stability based on last 96 logs (including timeouts > 5000ms)
         $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
         if ($stability24h !== null) {
@@ -249,6 +260,7 @@ class MonitorController extends Controller
     public function checkOneLight(int $id)
     {
         $monitor = Monitor::findOrFail($id);
+        $previousStatus = $monitor->last_status;
 
         $statusCode = 0;
         $responseTime = null;
@@ -296,6 +308,13 @@ class MonitorController extends Controller
             'redirect_count' => $redirectCount,
             'last_checked_at' => now(),
         ]);
+
+        app(OutageAlertService::class)->maybeSendOutageAlert(
+            $monitor,
+            $previousStatus,
+            $statusCode,
+            $error
+        );
 
         // Recalculate 24h stability based on last 96 logs (including slow responses / timeouts)
         $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);

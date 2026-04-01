@@ -40,6 +40,9 @@ Route::middleware('auth:sanctum')->group(function () {
 	Route::post('/settings/monitor-interval', [SettingsController::class, 'setMonitorInterval']);
 	Route::get('/settings/monitor-interval-light', [SettingsController::class, 'getLightMonitorInterval']);
 	Route::post('/settings/monitor-interval-light', [SettingsController::class, 'setLightMonitorInterval']);
+	Route::get('/settings/alert-email', [SettingsController::class, 'getAlertEmail']);
+	Route::post('/settings/alert-email', [SettingsController::class, 'setAlertEmail']);
+	Route::post('/settings/alert-email/test', [SettingsController::class, 'sendTestAlertEmail']);
 	Route::get('/settings/log-retention', [LogSettingsController::class, 'getRetention']);
 	Route::post('/settings/log-retention', [LogSettingsController::class, 'setRetention']);
 });

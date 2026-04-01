@@ -22,6 +22,13 @@ function mountSettingsModal(overrides = {}) {
     logRetentionSaving: false,
     saveLogRetention: jest.fn(),
 
+    alertRecipientEmail: "gondocs.robert@gmail.com",
+    setAlertRecipientEmail: jest.fn(),
+    alertEmailSaving: false,
+    saveAlertEmail: jest.fn(),
+    alertTestSending: false,
+    sendAlertTestEmail: jest.fn(),
+
     deletingAllLogs: false,
     handleDeleteAllLogs: jest.fn(),
     ...overrides,
@@ -38,6 +45,7 @@ test("renders settings sections with initial values", () => {
   expect(screen.getByText("Deep monitor intervallum")).toBeInTheDocument();
   expect(screen.getByText("Light monitor intervallum")).toBeInTheDocument();
   expect(screen.getByText("Napló megőrzési idő")).toBeInTheDocument();
+  expect(screen.getByText("Leállás értesítési email")).toBeInTheDocument();
 
   const spinboxes = screen.getAllByRole("spinbutton");
   expect(spinboxes).toHaveLength(3);
@@ -70,6 +78,12 @@ test("light interval, retention save and delete actions trigger callbacks", () =
 
   userEvent.click(saveButtons[2]);
   expect(modalActions.saveLogRetention).toHaveBeenCalledTimes(1);
+
+  userEvent.click(saveButtons[3]);
+  expect(modalActions.saveAlertEmail).toHaveBeenCalledTimes(1);
+
+  userEvent.click(screen.getByRole("button", { name: "Teszt email küldése" }));
+  expect(modalActions.sendAlertTestEmail).toHaveBeenCalledTimes(1);
 
   userEvent.click(screen.getByRole("button", { name: "Minden napló törlése" }));
   expect(modalActions.handleDeleteAllLogs).toHaveBeenCalledTimes(1);
