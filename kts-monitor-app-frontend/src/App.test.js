@@ -1,8 +1,18 @@
-import { render, screen } from '@testing-library/react';
-import App from './App';
+import React from "react";
+import { render, screen } from "@testing-library/react";
 
-test('renders learn react link', () => {
+jest.mock("./Auth/auth.tsx", () => ({
+  AuthProvider: ({ children }) => <>{children}</>,
+  useAuth: () => ({ user: null, loading: false }),
+}));
+
+jest.mock("./LoginPage/LoginPage.tsx", () => ({
+  LoginPage: () => <div>Mock Login</div>,
+}));
+
+import App from "./App";
+
+test("renders login page when not authenticated", () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  expect(screen.getByText("Mock Login")).toBeInTheDocument();
 });
