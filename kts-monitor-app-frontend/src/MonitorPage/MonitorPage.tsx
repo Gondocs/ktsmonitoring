@@ -1,5 +1,32 @@
-// src/MonitorPage/MonitorPage.tsx
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FiActivity,
+  FiAlertTriangle,
+  FiCheckCircle,
+  FiClock,
+  FiEdit2,
+  FiExternalLink,
+  FiFileText,
+  FiGlobe,
+  FiLogOut,
+  FiPlus,
+  FiRefreshCw,
+  FiSearch,
+  FiSettings,
+  FiShield,
+  FiTrash2,
+  FiZap,
+} from "react-icons/fi";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { ClipLoader } from "react-spinners";
 import {
   fetchSites,
@@ -22,17 +49,130 @@ import {
 } from "../Api/api.ts";
 import { useAuth } from "../Auth/auth.tsx";
 import { Monitor, MonitorLog } from "./MonitorTypes.ts";
-import { MonitorHeader } from "./MonitorHeader.tsx";
-import { MonitorListSection } from "./MonitorListSection.tsx";
-import { AddMonitorSection } from "./AddMonitorSection.tsx";
-import { LogsModal } from "./LogsModal.tsx";
+import { LogsModal } from "./LogsModal";
 import { SettingsModal } from "./SettingsModal.tsx";
 import { EditMonitorModal } from "./EditMonitorModal.tsx";
+import { ActivityHeatmap } from "./ActivityHeatmap.tsx";
+import {
+  ChartRange,
+  formatDateTimeHu,
+  formatRelativeTimeHu,
+  getRangeStartDate,
+  parseMonitorDate,
+} from "./timeUtils.ts";
+
+type MainView = "monitorok" | "globalisNaplok";
+
+type GlobalLogEntry = MonitorLog & {
+  monitor_name: string;
+  monitor_url: string;
+};
+
+const BRAND_BLUE = "#073a59";
+const BRAND_RED = "#af272f";
+const GLOBAL_LOGS_SITE_CAP = 20;
+
+const chartRangeOptions: { value: ChartRange; label: string }[] = [
+  { value: "24h", label: "24 óra" },
+  { value: "7d", label: "7 nap" },
+  { value: "30d", label: "30 nap" },
+  { value: "90d", label: "90 nap" },
+];
+
+const safeHost = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+};
+
+const getStatusColor = (m: Monitor) => {
+  if (m.last_status === 200) {
+    if ((m.last_response_time_ms ?? 0) > 5000) return "#f59e0b";
+    if ((m.stability_score ?? 100) < 67) return "#f59e0b";
+    return "#16a34a";
+  }
+  return BRAND_RED;
+};
+
+const getSslColor = (days: number | null) => {
+  if (days == null) return "#64748b";
+  if (days < 3) return BRAND_RED;
+  if (days < 14) return "#f59e0b";
+  return "#16a34a";
+};
+
+const buildMonitorResponseChart = (logs: MonitorLog[], range: ChartRange) => {
+  const start = getRangeStartDate(range).getTime();
+
+  return [...logs]
+    .filter((l) => l.response_time_ms != null)
+    .map((l) => {
+      const date = parseMonitorDate(l.checked_at || l.created_at);
+      return {
+        timestamp: date?.getTime() ?? 0,
+        idopont: date
+          ? date.toLocaleTimeString("hu-HU", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "-",
+        valaszido: l.response_time_ms,
+      };
+    })
+    .filter((x) => x.timestamp >= start)
+    .sort((a, b) => a.timestamp - b.timestamp);
+};
+
+const buildGlobalOutageChart = (logs: GlobalLogEntry[], range: ChartRange) => {
+  const startDate = getRangeStartDate(range);
+  startDate.setHours(0, 0, 0, 0);
+
+  const now = new Date();
+  const map = new Map<
+    string,
+    { datum: string; kimaradas: number; figyelmeztetes: number }
+  >();
+
+  for (let d = new Date(startDate); d <= now; d.setDate(d.getDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    map.set(key, {
+      datum: d.toLocaleDateString("hu-HU", {
+        month: "2-digit",
+        day: "2-digit",
+      }),
+      kimaradas: 0,
+      figyelmeztetes: 0,
+    });
+  }
+
+  logs.forEach((log) => {
+    const date = parseMonitorDate(log.checked_at || log.created_at);
+    if (!date || date < startDate) return;
+
+    const key = new Date(date).toISOString().slice(0, 10);
+    const day = map.get(key);
+    if (!day) return;
+
+    if (!log.status_code || log.status_code >= 500) {
+      day.kimaradas += 1;
+      return;
+    }
+
+    if (log.status_code >= 400 || (log.response_time_ms ?? 0) > 2500) {
+      day.figyelmeztetes += 1;
+    }
+  });
+
+  return Array.from(map.values());
+};
 
 export const MonitorPage: React.FC = () => {
   const { user, logout } = useAuth();
 
-  // ---- Core data state ----
+  const [mainView, setMainView] = useState<MainView>("monitorok");
+
   const [sites, setSites] = useState<Monitor[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,42 +181,58 @@ export const MonitorPage: React.FC = () => {
   const [refreshingLightIds, setRefreshingLightIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // ---- New monitor form ----
   const [newUrl, setNewUrl] = useState("");
   const [newName, setNewName] = useState("");
 
-  // ---- Sorting ----
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isSorting, setIsSorting] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
+  const [selectedMonitorId, setSelectedMonitorId] = useState<number | null>(
+    null,
+  );
+  const [detailChartRange, setDetailChartRange] = useState<ChartRange>("7d");
 
-  // ---- Logs modal ----
+  const [selectedMonitorLogs, setSelectedMonitorLogs] = useState<MonitorLog[]>(
+    [],
+  );
+  const [selectedMonitorLogsLoading, setSelectedMonitorLogsLoading] =
+    useState(false);
+
+  const [globalLogs, setGlobalLogs] = useState<GlobalLogEntry[]>([]);
+  const [globalLogsLoading, setGlobalLogsLoading] = useState(false);
+  const [globalLogsError, setGlobalLogsError] = useState<string | null>(null);
+  const [globalLogsScope, setGlobalLogsScope] = useState<string>("all");
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [globalChartRange, setGlobalChartRange] = useState<ChartRange>("7d");
+
   const [logModalMonitor, setLogModalMonitor] = useState<Monitor | null>(null);
   const [logs, setLogs] = useState<MonitorLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [logsLimit, setLogsLimit] = useState(50);
+  const [logsLimit, setLogsLimit] = useState(80);
   const [logViewTab, setLogViewTab] = useState<"table" | "chart">("table");
   const [deletingSiteLogs, setDeletingSiteLogs] = useState(false);
 
-  // ---- Settings modal ----
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [intervalMinutes, setIntervalMinutesState] = useState<number | null>(null);
+  const [intervalMinutes, setIntervalMinutesState] = useState<number | null>(
+    null,
+  );
   const [intervalLoading, setIntervalLoading] = useState(false);
   const [intervalSaving, setIntervalSaving] = useState(false);
-  const [lightIntervalMinutes, setLightIntervalMinutes] = useState<number | null>(null);
+  const [lightIntervalMinutes, setLightIntervalMinutes] = useState<
+    number | null
+  >(null);
   const [lightIntervalSaving, setLightIntervalSaving] = useState(false);
   const [logRetentionDays, setLogRetentionDays] = useState<number | null>(15);
   const [logRetentionSaving, setLogRetentionSaving] = useState(false);
   const [deletingAllLogs, setDeletingAllLogs] = useState(false);
 
-  // ---- Edit monitor modal ----
   const [editMonitor, setEditMonitor] = useState<Monitor | null>(null);
   const [editUrl, setEditUrl] = useState("");
   const [editName, setEditName] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
   const [editSaving, setEditSaving] = useState(false);
 
-  // ---- Load sites ----
   const loadSites = async () => {
     setLoading(true);
     setError(null);
@@ -94,36 +250,249 @@ export const MonitorPage: React.FC = () => {
     loadSites();
   }, []);
 
-  // ---- Helpers ----
-  const statusColor = (m: Monitor) => {
-    if (m.last_status === 200) {
-      if (m.last_response_time_ms != null && m.last_response_time_ms > 5000) {
-        return "orange";
-      }
-      if (m.stability_score != null && m.stability_score < 67) {
-        return "orange";
-      }
-      return "green";
-    }
-    return "red";
-  };
+  const filteredSites = useMemo(() => {
+    const search = searchValue.trim().toLowerCase();
+    if (!search) return sites;
 
-  const sslColor = (days: number | null) => {
-    if (days == null) return "";
-    if (days < 3) return "red";
-    if (days < 14) return "orange";
-    return "green";
-  };
+    return sites.filter((s) => {
+      const name = (s.name || "").toLowerCase();
+      const url = (s.url || "").toLowerCase();
+      return name.includes(search) || url.includes(search);
+    });
+  }, [sites, searchValue]);
+
+  const sortedActiveSites = useMemo(() => {
+    const activeSites = filteredSites.filter((s) => s.is_active);
+
+    return [...activeSites].sort((a, b) => {
+      let v1: any;
+      let v2: any;
+
+      switch (sortBy) {
+        case "name":
+          v1 = a.name?.toLowerCase() ?? "";
+          v2 = b.name?.toLowerCase() ?? "";
+          break;
+        case "response_time":
+          v1 = a.last_response_time_ms ?? 999999;
+          v2 = b.last_response_time_ms ?? 999999;
+          break;
+        case "status":
+          v1 = a.last_status ?? 0;
+          v2 = b.last_status ?? 0;
+          break;
+        case "redirect":
+          v1 = a.redirect_count ?? 0;
+          v2 = b.redirect_count ?? 0;
+          break;
+        case "stability":
+          v1 = a.stability_score ?? 0;
+          v2 = b.stability_score ?? 0;
+          break;
+        case "last_checked":
+          v1 = parseMonitorDate(a.last_checked_at)?.getTime() ?? 0;
+          v2 = parseMonitorDate(b.last_checked_at)?.getTime() ?? 0;
+          break;
+        default:
+          v1 = "";
+          v2 = "";
+      }
+
+      if (v1 < v2) return sortDirection === "asc" ? -1 : 1;
+      if (v1 > v2) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [filteredSites, sortBy, sortDirection]);
+
+  const inactiveSites = useMemo(
+    () => filteredSites.filter((s) => !s.is_active),
+    [filteredSites],
+  );
+
+  const selectedMonitor =
+    sites.find((s) => s.id === selectedMonitorId) ??
+    sortedActiveSites[0] ??
+    null;
+
+  useEffect(() => {
+    if (sites.length === 0) {
+      setSelectedMonitorId(null);
+      return;
+    }
+
+    const hasSelected = sites.some((s) => s.id === selectedMonitorId);
+    if (!hasSelected) {
+      setSelectedMonitorId(sites[0].id);
+    }
+  }, [sites, selectedMonitorId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSelectedLogs = async () => {
+      if (!selectedMonitor) {
+        setSelectedMonitorLogs([]);
+        return;
+      }
+
+      setSelectedMonitorLogsLoading(true);
+      try {
+        const data = await fetchSiteLogs(selectedMonitor.id, 400);
+        if (!cancelled) {
+          setSelectedMonitorLogs(data);
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedMonitorLogs([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setSelectedMonitorLogsLoading(false);
+        }
+      }
+    };
+
+    loadSelectedLogs();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMonitor?.id]);
+
+  const loadGlobalLogs = useCallback(
+    async (scope: string = globalLogsScope) => {
+      setGlobalLogsLoading(true);
+      setGlobalLogsError(null);
+
+      try {
+        let monitorsToQuery: Monitor[] = [];
+        if (scope === "all") {
+          monitorsToQuery = [...sites]
+            .filter((s) => s.is_active)
+            .sort((a, b) => {
+              const at = parseMonitorDate(a.last_checked_at)?.getTime() ?? 0;
+              const bt = parseMonitorDate(b.last_checked_at)?.getTime() ?? 0;
+              return bt - at;
+            })
+            .slice(0, GLOBAL_LOGS_SITE_CAP);
+        } else {
+          const found = sites.find((s) => String(s.id) === scope);
+          monitorsToQuery = found ? [found] : [];
+        }
+
+        if (monitorsToQuery.length === 0) {
+          setGlobalLogs([]);
+          setGlobalLogsLoading(false);
+          return;
+        }
+
+        const settled = await Promise.allSettled(
+          monitorsToQuery.map(async (monitor) => {
+            const entries = await fetchSiteLogs(monitor.id, 120);
+            return entries.map((entry: MonitorLog) => ({
+              ...entry,
+              monitor_name: monitor.name || safeHost(monitor.url),
+              monitor_url: monitor.url,
+            }));
+          }),
+        );
+
+        const merged: GlobalLogEntry[] = [];
+        settled.forEach((res) => {
+          if (res.status === "fulfilled") {
+            merged.push(...res.value);
+          }
+        });
+
+        merged.sort((a, b) => {
+          const at =
+            parseMonitorDate(a.checked_at || a.created_at)?.getTime() ?? 0;
+          const bt =
+            parseMonitorDate(b.checked_at || b.created_at)?.getTime() ?? 0;
+          return bt - at;
+        });
+
+        setGlobalLogs(merged);
+
+        const failedCount = settled.filter(
+          (r) => r.status === "rejected",
+        ).length;
+        if (failedCount > 0) {
+          setGlobalLogsError(
+            `${failedCount} monitor naplója nem volt elérhető, a többi adat betöltve.`,
+          );
+        }
+      } catch (err: any) {
+        setGlobalLogsError(
+          err.message || "Nem sikerült betölteni a globális naplókat.",
+        );
+      } finally {
+        setGlobalLogsLoading(false);
+      }
+    },
+    [globalLogsScope, sites],
+  );
+
+  useEffect(() => {
+    if (mainView === "globalisNaplok") {
+      loadGlobalLogs(globalLogsScope);
+    }
+  }, [mainView, globalLogsScope, loadGlobalLogs]);
+
+  const globalFilteredLogs = useMemo(() => {
+    const search = globalSearch.trim().toLowerCase();
+    if (!search) return globalLogs;
+
+    return globalLogs.filter((log) => {
+      return (
+        log.monitor_name.toLowerCase().includes(search) ||
+        log.monitor_url.toLowerCase().includes(search) ||
+        (log.error_message || "").toLowerCase().includes(search)
+      );
+    });
+  }, [globalLogs, globalSearch]);
+
+  const detailResponseChartData = useMemo(
+    () => buildMonitorResponseChart(selectedMonitorLogs, detailChartRange),
+    [selectedMonitorLogs, detailChartRange],
+  );
+
+  const globalOutageChartData = useMemo(
+    () => buildGlobalOutageChart(globalFilteredLogs, globalChartRange),
+    [globalFilteredLogs, globalChartRange],
+  );
+
+  const stats = useMemo(() => {
+    const total = sites.length;
+    const active = sites.filter((s) => s.is_active).length;
+    const offline = sites.filter(
+      (s) => (s.last_status ?? 0) >= 400 || s.last_status == null,
+    ).length;
+    const criticalSsl = sites.filter(
+      (s) => s.ssl_days_remaining != null && s.ssl_days_remaining <= 7,
+    ).length;
+    const responseTimes = sites
+      .map((s) => s.last_response_time_ms)
+      .filter((v): v is number => v != null);
+    const avgResponse = responseTimes.length
+      ? Math.round(
+          responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length,
+        )
+      : null;
+
+    return { total, active, offline, criticalSsl, avgResponse };
+  }, [sites]);
 
   const isRowRefreshing = (id: number) => refreshingIds.includes(id);
   const isRowRefreshingLight = (id: number) => refreshingLightIds.includes(id);
 
-  // ---- Global refresh ----
   const handleRefreshAll = async () => {
     setRefreshing(true);
     try {
       await checkAllSites();
       await loadSites();
+      if (mainView === "globalisNaplok") {
+        await loadGlobalLogs(globalLogsScope);
+      }
     } catch (err: any) {
       alert(err.message || "Nem sikerült frissíteni az összes weboldalt.");
     } finally {
@@ -136,17 +505,19 @@ export const MonitorPage: React.FC = () => {
     try {
       await checkAllSitesLight();
       await loadSites();
+      if (mainView === "globalisNaplok") {
+        await loadGlobalLogs(globalLogsScope);
+      }
     } catch (err: any) {
       alert(
         err.message ||
-          "Nem sikerült light ellenőrzést futtatni az összes weboldalra."
+          "Nem sikerült gyors ellenőrzést futtatni az összes weboldalra.",
       );
     } finally {
       setRefreshingLight(false);
     }
   };
 
-  // ---- Row refresh ----
   const handleRefreshOne = async (id: number) => {
     setRefreshingIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     try {
@@ -166,22 +537,23 @@ export const MonitorPage: React.FC = () => {
       await loadSites();
     } catch (err: any) {
       alert(
-        err.message || "Nem sikerült light ellenőrzést futtatni a weboldalra."
+        err.message || "Nem sikerült gyors ellenőrzést futtatni a weboldalra.",
       );
     } finally {
       setRefreshingLightIds((prev) => prev.filter((x) => x !== id));
     }
   };
 
-  // ---- Add monitor ----
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUrl) return;
+
     try {
       let normalizedUrl = newUrl.trim();
       if (!/^https?:\/\//i.test(normalizedUrl)) {
         normalizedUrl = `https://${normalizedUrl}`;
       }
+
       await createSite({ url: normalizedUrl, name: newName || undefined });
       setNewUrl("");
       setNewName("");
@@ -191,14 +563,15 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
-  // ---- Delete monitor ----
   const handleDelete = async (id: number) => {
     if (
       !window.confirm(
-        "Biztosan törölni szeretnéd ezt a monitorozott weboldalt?"
+        "Biztosan törölni szeretnéd ezt a monitorozott weboldalt?",
       )
-    )
+    ) {
       return;
+    }
+
     try {
       await deleteSite(id);
       await loadSites();
@@ -207,7 +580,6 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
-  // ---- Logs modal logic ----
   const openLogsModal = async (monitor: Monitor) => {
     setLogModalMonitor(monitor);
     setLogs([]);
@@ -240,11 +612,12 @@ export const MonitorPage: React.FC = () => {
     if (!logModalMonitor) return;
     if (
       !window.confirm(
-        "Biztosan törölni szeretnéd az összes naplóbejegyzést ehhez a weboldalhoz?"
+        "Biztosan törölni szeretnéd az összes naplóbejegyzést ehhez a weboldalhoz?",
       )
     ) {
       return;
     }
+
     try {
       setDeletingSiteLogs(true);
       await deleteSiteLogs(logModalMonitor.id);
@@ -256,10 +629,10 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
-  // ---- Settings modal logic ----
   const openSettings = async () => {
     setSettingsOpen(true);
     setIntervalLoading(true);
+
     try {
       const data = await getMonitorInterval();
       setIntervalMinutesState(data.interval_minutes ?? null);
@@ -289,14 +662,17 @@ export const MonitorPage: React.FC = () => {
   };
 
   const saveLightInterval = async () => {
-    if (lightIntervalMinutes == null || Number.isNaN(lightIntervalMinutes)) return;
+    if (lightIntervalMinutes == null || Number.isNaN(lightIntervalMinutes))
+      return;
     setLightIntervalSaving(true);
     try {
       const data = await setLightMonitorInterval(lightIntervalMinutes);
       setLightIntervalMinutes(data.interval_minutes ?? lightIntervalMinutes);
-      alert("Light intervallum sikeresen frissítve.");
+      alert("Gyors ellenőrzés intervallum sikeresen frissítve.");
     } catch (err: any) {
-      alert(err.message || "Nem sikerült menteni a light intervallumot.");
+      alert(
+        err.message || "Nem sikerült menteni a gyors ellenőrzés intervallumot.",
+      );
     } finally {
       setLightIntervalSaving(false);
     }
@@ -310,7 +686,7 @@ export const MonitorPage: React.FC = () => {
       alert("Napló megőrzési idő sikeresen frissítve.");
     } catch (err: any) {
       alert(
-        err.message || "Nem sikerült menteni a napló megőrzési beállítást."
+        err.message || "Nem sikerült menteni a napló megőrzési beállítást.",
       );
     } finally {
       setLogRetentionSaving(false);
@@ -320,16 +696,20 @@ export const MonitorPage: React.FC = () => {
   const handleDeleteAllLogs = async () => {
     if (
       !window.confirm(
-        "Biztosan törölni szeretnéd az ÖSSZES naplóbejegyzést MINDEN weboldalhoz? Ez a művelet nem vonható vissza."
+        "Biztosan törölni szeretnéd az összes naplóbejegyzést minden weboldalhoz? Ez a művelet nem vonható vissza.",
       )
     ) {
       return;
     }
+
     try {
       setDeletingAllLogs(true);
       await deleteAllLogs();
       if (logModalMonitor) {
         await reloadLogs();
+      }
+      if (mainView === "globalisNaplok") {
+        await loadGlobalLogs(globalLogsScope);
       }
       alert("Minden naplóbejegyzés törölve lett.");
     } catch (err: any) {
@@ -339,7 +719,6 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
-  // ---- Edit monitor logic ----
   const startEditMonitor = (monitor: Monitor) => {
     setEditMonitor(monitor);
     setEditUrl(monitor.url || "");
@@ -350,6 +729,7 @@ export const MonitorPage: React.FC = () => {
   const saveEditMonitor = async () => {
     if (!editMonitor) return;
     setEditSaving(true);
+
     try {
       let normalizedUrl = editUrl.trim();
       if (normalizedUrl && !/^https?:\/\//i.test(normalizedUrl)) {
@@ -371,121 +751,967 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
-  // ---- Derived lists & sorting ----
-  let activeSites = sites.filter((s) => s.is_active);
-
-  activeSites = [...activeSites].sort((a, b) => {
-    let v1: any;
-    let v2: any;
-
-    switch (sortBy) {
-      case "name":
-        v1 = a.name?.toLowerCase() ?? "";
-        v2 = b.name?.toLowerCase() ?? "";
-        break;
-      case "response_time":
-        v1 = a.last_response_time_ms ?? 999999;
-        v2 = b.last_response_time_ms ?? 999999;
-        break;
-      case "status":
-        v1 = a.last_status ?? 0;
-        v2 = b.last_status ?? 0;
-        break;
-      case "redirect":
-        v1 = a.redirect_count ?? 0;
-        v2 = b.redirect_count ?? 0;
-        break;
-      case "stability":
-        v1 = a.stability_score ?? 0;
-        v2 = b.stability_score ?? 0;
-        break;
-      case "last_checked":
-        v1 = a.last_checked_at ? new Date(a.last_checked_at).getTime() : 0;
-        v2 = b.last_checked_at ? new Date(b.last_checked_at).getTime() : 0;
-        break;
-      default:
-        v1 = "";
-        v2 = "";
-    }
-
-    if (v1 < v2) return sortDirection === "asc" ? -1 : 1;
-    if (v1 > v2) return sortDirection === "asc" ? 1 : -1;
-    return 0;
-  });
-
-  const inactiveSites = sites.filter((s) => !s.is_active);
-
-  // ---- Render ----
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50">
-      {/* Header */}
-      <MonitorHeader
-        user={user}
-        logout={logout}
-        sortBy={sortBy}
-        setSortBy={(value) => {
-          setIsSorting(true);
-          setSortBy(value);
-          setTimeout(() => setIsSorting(false), 250);
-        }}
-        sortDirection={sortDirection}
-        toggleSortDirection={() => {
-          setIsSorting(true);
-          setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-          setTimeout(() => setIsSorting(false), 250);
-        }}
-        isSorting={isSorting}
-        refreshing={refreshing}
-        refreshingLight={refreshingLight}
-        loading={loading}
-        onRefreshAll={handleRefreshAll}
-        onRefreshAllLight={handleRefreshAllLight}
-        openSettings={openSettings}
-      />
+    <div
+      className="min-h-screen bg-[#f6f9fc] text-slate-800"
+      style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+    >
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-[#073a59]/10 blur-3xl" />
+        <div className="absolute right-0 top-20 h-96 w-96 rounded-full bg-[#af272f]/10 blur-3xl" />
+      </div>
 
-      <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-4">
-            <ClipLoader color="#ef4444" size={50} />
-            <p className="text-slate-500 text-sm animate-pulse">
-              Adatok betöltése...
-            </p>
+      <div className="relative flex min-h-screen">
+        <aside className="hidden lg:flex w-72 flex-col justify-between border-r border-slate-200 bg-white/90 backdrop-blur-sm sticky top-0 h-screen">
+          <div className="p-5 space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+              <img
+                src="/ktsonlinelogo.png"
+                alt="KTS Online"
+                className="h-10 w-auto"
+              />
+              <p className="mt-2 text-xs text-slate-500">
+                Weboldal monitor központ
+              </p>
+            </div>
+
+            <nav className="space-y-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setMainView("monitorok")}
+                className={`w-full flex items-center gap-2 rounded-xl px-3 py-2.5 text-left transition ${
+                  mainView === "monitorok"
+                    ? "border border-[#073a59]/20 bg-[#073a59]/10 text-[#073a59] font-semibold"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                <FiActivity className="h-4 w-4" />
+                Monitorok áttekintése
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMainView("globalisNaplok")}
+                className={`w-full flex items-center gap-2 rounded-xl px-3 py-2.5 text-left transition ${
+                  mainView === "globalisNaplok"
+                    ? "border border-[#073a59]/20 bg-[#073a59]/10 text-[#073a59] font-semibold"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                <FiFileText className="h-4 w-4" />
+                Globális naplók
+              </button>
+            </nav>
           </div>
-        ) : error ? (
-          <div className="rounded-xl bg-red-950/20 border border-red-900/50 p-4 text-center">
-            <p className="text-sm text-red-400">{error}</p>
+
+          <div className="p-5 border-t border-slate-200 space-y-2">
+            <button
+              type="button"
+              onClick={openSettings}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+            >
+              <FiSettings className="h-4 w-4" />
+              Beállítások
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+            >
+              <FiLogOut className="h-4 w-4" />
+              Kijelentkezés
+            </button>
           </div>
-        ) : (
-          <>
-            <MonitorListSection
-              activeSites={activeSites}
-              inactiveSites={inactiveSites}
-              isSorting={isSorting}
-              refreshing={refreshing}
-              refreshingLight={refreshingLight}
-              statusColor={statusColor}
-              sslColor={sslColor}
-              isRowRefreshing={isRowRefreshing}
-              isRowRefreshingLight={isRowRefreshingLight}
-              onRefreshOne={handleRefreshOne}
-              onRefreshOneLight={handleRefreshOneLight}
-              onOpenLogs={openLogsModal}
-              onStartEdit={startEditMonitor}
-              onDelete={handleDelete}
-            />
+        </aside>
 
-            <AddMonitorSection
-              newUrl={newUrl}
-              newName={newName}
-              setNewUrl={setNewUrl}
-              setNewName={setNewName}
-              onAdd={handleAdd}
-            />
-          </>
-        )}
-      </main>
+        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
+          <header className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  KTS Online
+                </p>
+                <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+                  {mainView === "monitorok"
+                    ? "Monitorok egy oldalon"
+                    : "Globális napló nézet"}
+                </h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Belépve: {user?.email || "ismeretlen felhasználó"}
+                </p>
+              </div>
 
-      {/* Modals */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshAllLight}
+                  disabled={refreshingLight || loading}
+                  className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-60"
+                  style={{
+                    borderColor: "#073a59",
+                    color: "#073a59",
+                    backgroundColor: "#ffffff",
+                  }}
+                >
+                  <FiZap
+                    className={`h-4 w-4 ${refreshingLight ? "animate-pulse" : ""}`}
+                  />
+                  {refreshingLight
+                    ? "Gyors ellenőrzés fut..."
+                    : "Gyors ellenőrzés"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRefreshAll}
+                  disabled={refreshing || loading}
+                  className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white transition disabled:opacity-60"
+                  style={{ backgroundColor: BRAND_BLUE }}
+                >
+                  <FiRefreshCw
+                    className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                  />
+                  {refreshing
+                    ? "Teljes ellenőrzés fut..."
+                    : "Teljes ellenőrzés"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMainView("monitorok")}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold ${
+                  mainView === "monitorok"
+                    ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                    : "border-slate-300 bg-white text-slate-600"
+                }`}
+              >
+                Monitorok
+              </button>
+              <button
+                type="button"
+                onClick={() => setMainView("globalisNaplok")}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold ${
+                  mainView === "globalisNaplok"
+                    ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                    : "border-slate-300 bg-white text-slate-600"
+                }`}
+              >
+                Globális naplók
+              </button>
+            </div>
+          </header>
+
+          {mainView === "monitorok" ? (
+            <>
+              <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs uppercase tracking-wider text-slate-500">
+                    Összes webhely
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-slate-900">
+                    {stats.total}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+                  <p className="text-xs uppercase tracking-wider text-emerald-700">
+                    Aktív webhely
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-emerald-700">
+                    {stats.active}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[#af272f]/25 bg-[#af272f]/10 p-4 shadow-sm">
+                  <p className="text-xs uppercase tracking-wider text-[#af272f]">
+                    Offline / hiba
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-[#af272f]">
+                    {stats.offline}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[#073a59]/20 bg-[#073a59]/10 p-4 shadow-sm">
+                  <p className="text-xs uppercase tracking-wider text-[#073a59]">
+                    Átlag válaszidő
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-[#073a59]">
+                    {stats.avgResponse != null
+                      ? `${stats.avgResponse} ms`
+                      : "Nincs adat"}
+                  </p>
+                </div>
+              </section>
+
+              <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div className="p-4 border-b border-slate-200 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 w-full sm:w-80">
+                      <FiSearch className="h-4 w-4 text-slate-500" />
+                      <input
+                        value={searchValue}
+                        onChange={(e) => setSearchValue(e.target.value)}
+                        className="w-full bg-transparent text-sm text-slate-700 focus:outline-none"
+                        placeholder="Keresés név vagy URL alapján"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={sortBy}
+                        onChange={(e) => {
+                          setIsSorting(true);
+                          setSortBy(e.target.value);
+                          setTimeout(() => setIsSorting(false), 200);
+                        }}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                      >
+                        <option value="name">Név</option>
+                        <option value="response_time">Válaszidő</option>
+                        <option value="status">HTTP státusz</option>
+                        <option value="redirect">Átirányítás</option>
+                        <option value="stability">Stabilitás</option>
+                        <option value="last_checked">Utolsó ellenőrzés</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSorting(true);
+                          setSortDirection((d) =>
+                            d === "asc" ? "desc" : "asc",
+                          );
+                          setTimeout(() => setIsSorting(false), 200);
+                        }}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700"
+                        title={sortDirection === "asc" ? "Növekvő" : "Csökkenő"}
+                      >
+                        {sortDirection === "asc" ? "NÖV" : "CSÖK"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {loading ? (
+                    <div className="py-20 flex flex-col items-center gap-3">
+                      <ClipLoader color={BRAND_BLUE} size={36} />
+                      <p className="text-sm text-slate-500">
+                        Adatok betöltése...
+                      </p>
+                    </div>
+                  ) : error ? (
+                    <div className="p-6">
+                      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {error}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                          <tr>
+                            <th className="px-4 py-3">Webhely</th>
+                            <th className="px-4 py-3">Státusz</th>
+                            <th className="px-4 py-3">Válaszidő</th>
+                            <th className="px-4 py-3">SSL</th>
+                            <th className="px-4 py-3">Stabilitás</th>
+                            <th className="px-4 py-3">Utolsó ellenőrzés</th>
+                            <th className="px-4 py-3 text-right">Műveletek</th>
+                          </tr>
+                        </thead>
+                        <tbody
+                          className={`divide-y divide-slate-100 transition-opacity ${isSorting ? "opacity-60" : "opacity-100"}`}
+                        >
+                          {sortedActiveSites.length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={7}
+                                className="px-4 py-10 text-center text-slate-500"
+                              >
+                                Nincs megjeleníthető aktív monitor.
+                              </td>
+                            </tr>
+                          ) : (
+                            sortedActiveSites.map((m) => {
+                              const rowRefreshing =
+                                isRowRefreshing(m.id) ||
+                                isRowRefreshingLight(m.id) ||
+                                refreshing ||
+                                refreshingLight;
+
+                              const selected = selectedMonitor?.id === m.id;
+
+                              return (
+                                <tr
+                                  key={m.id}
+                                  className={`transition ${selected ? "bg-[#073a59]/5" : "hover:bg-slate-50"} ${rowRefreshing ? "opacity-60" : ""}`}
+                                  onClick={() => setSelectedMonitorId(m.id)}
+                                >
+                                  <td className="px-4 py-3 min-w-[220px]">
+                                    <p className="font-semibold text-slate-900">
+                                      {m.name || safeHost(m.url)}
+                                    </p>
+                                    <a
+                                      href={m.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-xs inline-flex items-center gap-1"
+                                      style={{ color: BRAND_BLUE }}
+                                    >
+                                      {safeHost(m.url)}
+                                      <FiExternalLink className="h-3 w-3" />
+                                    </a>
+                                  </td>
+
+                                  <td className="px-4 py-3">
+                                    <span
+                                      className="inline-flex items-center rounded-full px-2 py-1 text-xs font-bold"
+                                      style={{
+                                        color: getStatusColor(m),
+                                        backgroundColor: `${getStatusColor(m)}18`,
+                                      }}
+                                    >
+                                      {m.last_status ?? "HIBA"}
+                                    </span>
+                                  </td>
+
+                                  <td className="px-4 py-3 font-mono text-xs text-slate-700">
+                                    {m.last_response_time_ms != null
+                                      ? `${m.last_response_time_ms} ms`
+                                      : "Nincs adat"}
+                                  </td>
+
+                                  <td
+                                    className="px-4 py-3 text-xs font-semibold"
+                                    style={{
+                                      color: getSslColor(m.ssl_days_remaining),
+                                    }}
+                                  >
+                                    {m.ssl_days_remaining != null
+                                      ? `${m.ssl_days_remaining} nap`
+                                      : "Nincs adat"}
+                                  </td>
+
+                                  <td className="px-4 py-3">
+                                    {m.stability_score != null ? (
+                                      <div className="flex items-center gap-2">
+                                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-200">
+                                          <div
+                                            className={`h-full rounded-full ${
+                                              m.stability_score >= 95
+                                                ? "bg-emerald-500"
+                                                : m.stability_score >= 85
+                                                  ? "bg-amber-500"
+                                                  : "bg-[#af272f]"
+                                            }`}
+                                            style={{
+                                              width: `${m.stability_score}%`,
+                                            }}
+                                          />
+                                        </div>
+                                        <span className="text-xs font-mono text-slate-700">
+                                          {m.stability_score}%
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-slate-500">
+                                        Nincs adat
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  <td className="px-4 py-3 text-xs text-slate-500">
+                                    {formatRelativeTimeHu(m.last_checked_at)}
+                                  </td>
+
+                                  <td className="px-4 py-3">
+                                    <div
+                                      className="flex items-center justify-end gap-1.5"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleRefreshOneLight(m.id)
+                                        }
+                                        disabled={rowRefreshing}
+                                        className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                                        title="Gyors ellenőrzés"
+                                      >
+                                        <FiZap className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRefreshOne(m.id)}
+                                        disabled={rowRefreshing}
+                                        className="rounded-lg p-2 text-white disabled:opacity-50"
+                                        title="Teljes ellenőrzés"
+                                        style={{ backgroundColor: BRAND_BLUE }}
+                                      >
+                                        <FiRefreshCw className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openLogsModal(m)}
+                                        className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-100"
+                                        title="Naplók"
+                                      >
+                                        <FiFileText className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => startEditMonitor(m)}
+                                        className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-100"
+                                        title="Szerkesztés"
+                                      >
+                                        <FiEdit2 className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDelete(m.id)}
+                                        className="rounded-lg border p-2 hover:bg-red-50"
+                                        title="Törlés"
+                                        style={{
+                                          borderColor: `${BRAND_RED}55`,
+                                          color: BRAND_RED,
+                                        }}
+                                      >
+                                        <FiTrash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {inactiveSites.length > 0 && (
+                    <div className="border-t border-slate-200 p-4">
+                      <p className="text-xs uppercase tracking-wider text-slate-500 mb-3">
+                        Inaktív monitorok ({inactiveSites.length})
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {inactiveSites.map((m) => (
+                          <button
+                            type="button"
+                            key={m.id}
+                            onClick={() => startEditMonitor(m)}
+                            className="text-left rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 hover:bg-slate-100 transition"
+                          >
+                            <p className="text-sm font-semibold text-slate-700 truncate">
+                              {m.name || safeHost(m.url)}
+                            </p>
+                            <p className="text-xs text-slate-500 truncate">
+                              {m.url}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-bold text-slate-900">
+                        Webhely részletei
+                      </h3>
+                      {selectedMonitor && (
+                        <span className="text-xs text-slate-500">
+                          ID #{selectedMonitor.id}
+                        </span>
+                      )}
+                    </div>
+
+                    {!selectedMonitor ? (
+                      <p className="mt-3 text-sm text-slate-500">
+                        Válassz egy sort a táblázatból.
+                      </p>
+                    ) : (
+                      <div className="mt-4 space-y-4">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {selectedMonitor.name ||
+                              safeHost(selectedMonitor.url)}
+                          </p>
+                          <a
+                            href={selectedMonitor.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 inline-flex items-center gap-1 text-xs"
+                            style={{ color: BRAND_BLUE }}
+                          >
+                            {selectedMonitor.url}
+                            <FiExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl border border-slate-200 p-3">
+                            <p className="text-slate-500">Állapot</p>
+                            <p
+                              className="mt-1 font-bold"
+                              style={{ color: getStatusColor(selectedMonitor) }}
+                            >
+                              {selectedMonitor.last_status === 200
+                                ? "Elérhető"
+                                : "Hiba"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 p-3">
+                            <p className="text-slate-500">SSL</p>
+                            <p
+                              className="mt-1 font-bold"
+                              style={{
+                                color: getSslColor(
+                                  selectedMonitor.ssl_days_remaining,
+                                ),
+                              }}
+                            >
+                              {selectedMonitor.ssl_days_remaining != null
+                                ? `${selectedMonitor.ssl_days_remaining} nap`
+                                : "Nincs adat"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 p-3">
+                            <p className="text-slate-500">Válaszidő</p>
+                            <p className="mt-1 font-bold text-slate-800">
+                              {selectedMonitor.last_response_time_ms != null
+                                ? `${selectedMonitor.last_response_time_ms} ms`
+                                : "Nincs adat"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 p-3">
+                            <p className="text-slate-500">Utolsó ellenőrzés</p>
+                            <p className="mt-1 font-bold text-slate-800">
+                              {formatRelativeTimeHu(
+                                selectedMonitor.last_checked_at,
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                          <p className="text-xs uppercase tracking-wider text-slate-500">
+                            Rendszerinformációk
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="rounded-lg bg-slate-50 px-2 py-1.5">
+                              <p className="text-slate-500">CMS</p>
+                              <p className="font-semibold text-slate-800">
+                                {selectedMonitor.is_wordpress
+                                  ? "WordPress"
+                                  : "Nem azonosított"}
+                              </p>
+                            </div>
+                            <div className="rounded-lg bg-slate-50 px-2 py-1.5">
+                              <p className="text-slate-500">WP verzió</p>
+                              <p className="font-semibold text-slate-800">
+                                {selectedMonitor.wordpress_version ||
+                                  "Nincs adat"}
+                              </p>
+                            </div>
+                            <div className="rounded-lg bg-slate-50 px-2 py-1.5">
+                              <p className="text-slate-500">Átirányítás</p>
+                              <p className="font-semibold text-slate-800">
+                                {selectedMonitor.redirect_count ?? 0}
+                              </p>
+                            </div>
+                            <div className="rounded-lg bg-slate-50 px-2 py-1.5">
+                              <p className="text-slate-500">HSTS</p>
+                              <p className="font-semibold text-slate-800">
+                                {selectedMonitor.has_hsts
+                                  ? "Engedélyezve"
+                                  : "Hiányzik"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 p-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                              Válaszidő grafikon
+                            </p>
+                            <select
+                              value={detailChartRange}
+                              onChange={(e) =>
+                                setDetailChartRange(
+                                  e.target.value as ChartRange,
+                                )
+                              }
+                              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                            >
+                              {chartRangeOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="mt-3 h-40">
+                            {selectedMonitorLogsLoading ? (
+                              <div className="h-full flex items-center justify-center">
+                                <ClipLoader color={BRAND_BLUE} size={24} />
+                              </div>
+                            ) : detailResponseChartData.length === 0 ? (
+                              <div className="h-full flex items-center justify-center text-xs text-slate-500">
+                                Nincs elegendő adat a grafikonhoz.
+                              </div>
+                            ) : (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={detailResponseChartData}>
+                                  <CartesianGrid
+                                    strokeDasharray="3 3"
+                                    stroke="#e2e8f0"
+                                  />
+                                  <XAxis
+                                    dataKey="idopont"
+                                    tick={{ fontSize: 10, fill: "#64748b" }}
+                                  />
+                                  <YAxis
+                                    tick={{ fontSize: 10, fill: "#64748b" }}
+                                    width={42}
+                                  />
+                                  <Tooltip
+                                    formatter={(value: any) => [
+                                      `${value} ms`,
+                                      "Válaszidő",
+                                    ]}
+                                    labelFormatter={(label) =>
+                                      `Időpont: ${label}`
+                                    }
+                                  />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="valaszido"
+                                    stroke={BRAND_BLUE}
+                                    strokeWidth={2}
+                                    dot={false}
+                                  />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            )}
+                          </div>
+                        </div>
+
+                        <ActivityHeatmap
+                          logs={selectedMonitorLogs}
+                          title="Kiesési aktivitás (GitHub stílus)"
+                        />
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openLogsModal(selectedMonitor)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            <FiFileText className="h-3.5 w-3.5" />
+                            Naplók
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => startEditMonitor(selectedMonitor)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            <FiEdit2 className="h-3.5 w-3.5" />
+                            Szerkesztés
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <form
+                    onSubmit={handleAdd}
+                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="h-7 w-7 rounded-full flex items-center justify-center text-white"
+                        style={{ backgroundColor: BRAND_BLUE }}
+                      >
+                        <FiPlus className="h-4 w-4" />
+                      </div>
+                      <h3 className="text-base font-bold text-slate-900">
+                        Új monitor hozzáadása
+                      </h3>
+                    </div>
+                    <input
+                      type="text"
+                      value={newUrl}
+                      onChange={(e) => setNewUrl(e.target.value)}
+                      required
+                      placeholder="https://pelda.hu"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="Név (opcionális)"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      className="w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition"
+                      style={{ backgroundColor: BRAND_BLUE }}
+                    >
+                      Hozzáadás
+                    </button>
+                  </form>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-xs uppercase tracking-wider text-slate-500">
+                      Élő riasztások
+                    </p>
+                    <div className="mt-3 space-y-2 text-sm">
+                      <div className="flex items-center gap-2 text-emerald-700">
+                        <FiCheckCircle className="h-4 w-4" />
+                        Aktív monitorok: {stats.active}
+                      </div>
+                      <div
+                        className="flex items-center gap-2"
+                        style={{ color: BRAND_RED }}
+                      >
+                        <FiAlertTriangle className="h-4 w-4" />
+                        Kritikus SSL: {stats.criticalSsl}
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <FiClock className="h-4 w-4" />
+                        Offline / hiba: {stats.offline}
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <FiShield className="h-4 w-4" />
+                        Összes monitor: {stats.total}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </>
+          ) : (
+            <section className="space-y-6">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2">
+                      <FiSearch className="h-4 w-4 text-slate-500" />
+                      <input
+                        value={globalSearch}
+                        onChange={(e) => setGlobalSearch(e.target.value)}
+                        className="w-full bg-transparent text-sm text-slate-700 focus:outline-none"
+                        placeholder="Keresés monitor név, URL vagy hiba szerint"
+                      />
+                    </div>
+
+                    <select
+                      value={globalLogsScope}
+                      onChange={(e) => setGlobalLogsScope(e.target.value)}
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+                    >
+                      <option value="all">
+                        Összes monitor (max {GLOBAL_LOGS_SITE_CAP})
+                      </option>
+                      {sites.map((site) => (
+                        <option key={site.id} value={String(site.id)}>
+                          {site.name || safeHost(site.url)}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={globalChartRange}
+                      onChange={(e) =>
+                        setGlobalChartRange(e.target.value as ChartRange)
+                      }
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+                    >
+                      {chartRangeOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          Grafikon: {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => loadGlobalLogs(globalLogsScope)}
+                    className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white"
+                    style={{ backgroundColor: BRAND_BLUE }}
+                  >
+                    <FiRefreshCw
+                      className={`h-4 w-4 ${globalLogsLoading ? "animate-spin" : ""}`}
+                    />
+                    Globális naplók frissítése
+                  </button>
+                </div>
+
+                {globalLogsScope === "all" && (
+                  <p className="mt-3 text-xs text-slate-500">
+                    Az összesített nézet a legutóbb ellenőrzött{" "}
+                    {GLOBAL_LOGS_SITE_CAP} aktív monitor naplóit gyűjti.
+                  </p>
+                )}
+
+                {globalLogsError && (
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    {globalLogsError}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Kimaradási trend
+                </p>
+                <div className="mt-3 h-56">
+                  {globalLogsLoading ? (
+                    <div className="h-full flex items-center justify-center">
+                      <ClipLoader color={BRAND_BLUE} size={28} />
+                    </div>
+                  ) : globalOutageChartData.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-slate-500">
+                      Nincs adat a globális grafikonhoz.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={globalOutageChartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis
+                          dataKey="datum"
+                          tick={{ fontSize: 10, fill: "#64748b" }}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10, fill: "#64748b" }}
+                          width={42}
+                        />
+                        <Tooltip />
+                        <Legend />
+                        <Line
+                          type="monotone"
+                          dataKey="figyelmeztetes"
+                          name="Figyelmeztetés"
+                          stroke="#f59e0b"
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="kimaradas"
+                          name="Kimaradás"
+                          stroke={BRAND_RED}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+
+              <ActivityHeatmap
+                logs={globalFilteredLogs}
+                title="Rendszerszintű aktivitás (GitHub stílus)"
+              />
+
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="border-b border-slate-200 px-4 py-3">
+                  <p className="text-sm font-semibold text-slate-800">
+                    Globális naplólista
+                  </p>
+                </div>
+
+                {globalLogsLoading ? (
+                  <div className="py-14 flex items-center justify-center">
+                    <ClipLoader color={BRAND_BLUE} size={28} />
+                  </div>
+                ) : globalFilteredLogs.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-slate-500">
+                    Nincs megjeleníthető globális naplóbejegyzés.
+                  </div>
+                ) : (
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                        <tr>
+                          <th className="px-4 py-3">Időpont</th>
+                          <th className="px-4 py-3">Webhely</th>
+                          <th className="px-4 py-3">HTTP státusz</th>
+                          <th className="px-4 py-3">Válaszidő</th>
+                          <th className="px-4 py-3">Részletek</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {globalFilteredLogs.slice(0, 1200).map((log) => {
+                          const hasError =
+                            !log.status_code || log.status_code >= 400;
+                          return (
+                            <tr
+                              key={`${log.monitor_id}-${log.id}`}
+                              className="hover:bg-slate-50"
+                            >
+                              <td className="px-4 py-3 text-xs text-slate-600 font-mono">
+                                {formatDateTimeHu(
+                                  log.checked_at || log.created_at,
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="min-w-[220px]">
+                                  <p className="font-semibold text-slate-800">
+                                    {log.monitor_name}
+                                  </p>
+                                  <a
+                                    href={log.monitor_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-xs inline-flex items-center gap-1"
+                                    style={{ color: BRAND_BLUE }}
+                                  >
+                                    {safeHost(log.monitor_url)}
+                                    <FiExternalLink className="h-3 w-3" />
+                                  </a>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className="inline-flex rounded-full px-2 py-1 text-xs font-bold"
+                                  style={{
+                                    color: hasError ? BRAND_RED : "#16a34a",
+                                    backgroundColor: hasError
+                                      ? `${BRAND_RED}18`
+                                      : "#16a34a18",
+                                  }}
+                                >
+                                  {log.status_code ?? "HIBA"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-xs font-mono text-slate-700">
+                                {log.response_time_ms != null
+                                  ? `${log.response_time_ms} ms`
+                                  : "Nincs adat"}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-600 break-all">
+                                {log.error_message || "OK"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+        </main>
+      </div>
+
       {logModalMonitor && (
         <LogsModal
           monitor={logModalMonitor}
