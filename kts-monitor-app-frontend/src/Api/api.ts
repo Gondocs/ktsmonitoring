@@ -1,4 +1,14 @@
-const API_BASE = 'http://127.0.0.1:8888/api';
+/// <reference types="node" />
+
+const isLocalHost =
+	window.location.hostname === 'localhost' ||
+	window.location.hostname === '127.0.0.1';
+
+const defaultApiBase = isLocalHost
+	? 'http://127.0.0.1:8888/api'
+	: '/api';
+
+const API_BASE = (process.env.REACT_APP_API_BASE || defaultApiBase).replace(/\/$/, '');
 
 let authToken: string | null = localStorage.getItem('authToken');
 
@@ -28,7 +38,17 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 	}
 
 	const text = await res.text();
-	const data = text ? JSON.parse(text) : null;
+	const contentType = res.headers.get('content-type') || '';
+	let data: any = null;
+
+	if (text !== '') {
+		if (contentType.includes('application/json')) {
+			data = JSON.parse(text);
+		} else {
+			const snippet = text.slice(0, 120).replace(/\s+/g, ' ').trim();
+			throw new Error(`API response was not JSON (${res.status}) from ${res.url}. Body starts with: ${snippet}`);
+		}
+	}
 
 	if (!res.ok) {
 		const message = (data && data.message) || res.statusText;

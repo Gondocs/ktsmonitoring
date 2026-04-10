@@ -8,10 +8,10 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\LogSettingsController;
 
 // Public auth routes
-Route::post('/login', [AuthController::class, 'login']);
+Route::middleware('throttle:login')->post('/login', [AuthController::class, 'login']);
 
 // Routes that require a valid Sanctum token in the Authorization header
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 	Route::post('/logout', [AuthController::class, 'logout']);
 	Route::get('/me', [AuthController::class, 'me']);
 

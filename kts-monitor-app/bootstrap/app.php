@@ -13,11 +13,11 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         // Disable redirect to a non‑existent "login" route
-        $middleware->redirectGuestsTo(fn () => null);
+        $middleware->redirectGuestsTo(fn() => null);
     })
     ->withSchedule(function (Schedule $schedule) {
         // Light check every minute
-        $schedule->command('sites:check-light')->everyMinute();
+        $schedule->command('sites:check-light')->everyMinute()->withoutOverlapping();
 
         // Deep check – adjust interval as you like
         $schedule->command('sites:check')->dailyAt('04:00');

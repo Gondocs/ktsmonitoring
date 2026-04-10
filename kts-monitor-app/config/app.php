@@ -130,6 +130,15 @@ return [
     'monitor_interval_light_minutes' => env('MONITOR_INTERVAL_LIGHT_MINUTES', 15),
 
     // Maximum number of light checks per automatic scheduler run
-    'monitor_light_batch_size' => env('MONITOR_LIGHT_BATCH_SIZE', 10),
+    'monitor_light_batch_size' => env('MONITOR_LIGHT_BATCH_SIZE', 15),
+
+    // Parallel HTTP requests for light checks
+    'monitor_light_pool_concurrency' => env('MONITOR_LIGHT_POOL_CONCURRENCY', 10),
+
+    // HEAD status codes that should trigger GET fallback checks
+    'monitor_light_head_fallback_statuses' => array_map(
+        'intval',
+        explode(',', (string) env('MONITOR_LIGHT_HEAD_FALLBACK_STATUSES', '405'))
+    ),
 
 ];

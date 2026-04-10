@@ -2,129 +2,334 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use App\Models\Monitor;
 use App\Models\MonitorLog;
 use App\Models\Setting;
 use App\Services\OutageAlertService;
+use GuzzleHttp\Client;
+use GuzzleHttp\Pool;
+use GuzzleHttp\Promise\Create;
+use GuzzleHttp\TransferStats;
+use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Collection;
+use Psr\Http\Message\ResponseInterface;
+use Throwable;
 
 class CheckSitesLight extends Command
 {
     protected $signature = 'sites:check-light {--force : Run checks ignoring light interval limit}';
-    protected $description = 'Gyors rendelkezésre állás ellenőrzés (HEAD request only)';
+    protected $description = 'Gyors rendelkezésre állás ellenőrzés (parallel HEAD + optional GET fallback)';
 
-    const USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
-    const CONNECT_TIMEOUT_SECONDS = 3;
-    const REQUEST_TIMEOUT_SECONDS = 6;
+    private const USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
+    private const CONNECT_TIMEOUT_SECONDS = 3.0;
+    private const REQUEST_TIMEOUT_SECONDS = 15.0;
+    private const MAX_REDIRECTS = 5;
+    private const DEFAULT_HEAD_FALLBACK_STATUSES = [405];
 
-    public function handle()
+    public function handle(): int
     {
         $force = (bool) $this->option('force');
-        $defaultInterval = config('app.monitor_interval_light_minutes');
+
+        $defaultInterval = (int) config('app.monitor_interval_light_minutes', 5);
         $intervalMinutes = (int) Setting::get('monitor_interval_light_minutes', $defaultInterval);
+
         $batchSize = (int) config('app.monitor_light_batch_size', 15);
+        $fallbackStatuses = $this->resolveFallbackStatuses();
 
-        if ($force) {
-            // Manual run: ignore interval and batch limits, check all active monitors
-            $monitors = Monitor::where('is_active', true)->get();
-        } else {
-            // Scheduler run: always check the next batch of oldest monitors
-            $monitors = Monitor::where('is_active', true)
-                ->orderBy('last_checked_at', 'asc')
-                ->limit($batchSize)
-                ->get();
+        $monitors = $this->getMonitorsToCheck($force, $intervalMinutes, $batchSize);
 
-            if ($monitors->isEmpty()) {
-                $this->info('Nincs light ellenőrzésre esedékes monitor.');
-                return 0;
-            }
+        if ($monitors->isEmpty()) {
+            $this->info('Nincs light ellenőrzésre esedékes monitor.');
+            return self::SUCCESS;
         }
 
-        $this->info('Gyors ellenőrzés indítása ' . count($monitors) . ' monitoron...');
+        $this->info('Gyors ellenőrzés indítása ' . $monitors->count() . ' monitoron (parallel HEAD)...');
+
         $outageAlertService = app(OutageAlertService::class);
+
+        // 1) HEAD ellenőrzések párhuzamosan
+        $headResults = $this->runPool($monitors, 'HEAD');
+
+        // 2) Csak a valóban indokolt fallbackek menjenek GET-re, szintén párhuzamosan
+        $fallbackMonitors = $monitors->filter(function (Monitor $monitor) use ($headResults, $fallbackStatuses) {
+            $result = $headResults[(string) $monitor->id] ?? null;
+
+            if ($result === null) {
+                return false;
+            }
+
+            return in_array((int) ($result['status_code'] ?? 0), $fallbackStatuses, true);
+        })->values();
+
+        $fallbackResults = [];
+        if ($fallbackMonitors->isNotEmpty()) {
+            $this->info('GET fallback indul ' . $fallbackMonitors->count() . ' monitorra...');
+            $fallbackResults = $this->runPool($fallbackMonitors, 'GET', [
+                'Range' => 'bytes=0-0',
+                'Accept-Encoding' => 'identity',
+            ]);
+        }
+
+        $checkedAt = now();
 
         foreach ($monitors as $monitor) {
             /** @var Monitor $monitor */
+            $monitorId = (string) $monitor->id;
             $previousStatus = $monitor->last_status;
-            $start = microtime(true);
-            $statusCode = 0;
-            $error = null;
-            $redirectCount = 0;
 
-            try {
-                $response = Http::connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
-                    ->timeout(self::REQUEST_TIMEOUT_SECONDS)
-                    ->withOptions([
-                        'allow_redirects' => [
-                            'max' => 5,
-                            'track_redirects' => true,
-                        ],
-                    ])
-                    ->withHeaders(['User-Agent' => self::USER_AGENT])
-                    ->head($monitor->url);
+            $result = $headResults[$monitorId] ?? $this->emptyResult();
 
-                $statusCode = $response->status();
-
-                $redirectHistory = $response->header('X-Guzzle-Redirect-History');
-                if ($redirectHistory !== null) {
-                    $redirectUrls = array_filter(explode(', ', $redirectHistory));
-                    $redirectCount = count($redirectUrls);
-                }
-
-                // Megpróbálom ez nélkü, hogy futnak-e problémák a HEAD kéréssel
-                /*
-                 if ($statusCode === 405) {
-                     $response = Http::timeout(10)
-                         ->withHeaders(['User-Agent' => self::USER_AGENT])
-                         ->get($monitor->url);
-                     $statusCode = $response->status();
-                 }
-
-                 */
-
-            } catch (\Exception $e) {
-                $error = $e->getMessage();
+            if (isset($fallbackResults[$monitorId])) {
+                $result = $fallbackResults[$monitorId];
+                $result['used_fallback'] = true;
+            } else {
+                $result['used_fallback'] = false;
             }
 
-            $end = microtime(true);
-            $responseTime = (int) round(($end - $start) * 1000);
+            $statusCode = (int) ($result['status_code'] ?? 0);
+            $responseTimeMs = (int) ($result['response_time_ms'] ?? 0);
+            $errorMessage = $result['error_message'] ?? null;
+            $redirectCount = (int) ($result['redirect_count'] ?? 0);
 
             MonitorLog::create([
                 'monitor_id' => $monitor->id,
                 'status_code' => $statusCode,
-                'response_time_ms' => $responseTime,
-                'error_message' => $error,
-                'checked_at' => now(),
+                'response_time_ms' => $responseTimeMs,
+                'error_message' => $errorMessage,
+                'checked_at' => $checkedAt,
             ]);
 
-            $isUp = ($statusCode >= 200 && $statusCode < 400);
+            $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
 
-            $monitor->update([
-                'last_status' => $statusCode,
-                'last_response_time_ms' => $responseTime,
-                'redirect_count' => $redirectCount,
-                'last_checked_at' => now(),
-            ]);
+            $monitor->last_status = $statusCode;
+            $monitor->last_response_time_ms = $responseTimeMs;
+            $monitor->redirect_count = $redirectCount;
+            $monitor->last_checked_at = $checkedAt;
+
+            if ($stability24h !== null) {
+                $monitor->stability_score = $stability24h;
+            }
+
+            $monitor->save();
 
             $outageAlertService->maybeSendOutageAlert(
                 $monitor,
                 $previousStatus,
                 $statusCode,
-                $error
+                $errorMessage
             );
 
-            // Recalculate 24h stability from logs (max 96 entries, >5000ms = failure)
-            $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
-            if ($stability24h !== null) {
-                $monitor->stability_score = $stability24h;
-                $monitor->save();
-            }
-
+            $isUp = ($statusCode >= 200 && $statusCode < 400);
             $statusMsg = $isUp ? 'OK (' . $statusCode . ')' : 'HIBA (' . $statusCode . ')';
-            $this->line($monitor->url . ' -> ' . $statusMsg . ' (' . $responseTime . 'ms)');
+            $fallbackTag = !empty($result['used_fallback']) ? ' [GET fallback]' : '';
+
+            $this->line(
+                $monitor->url
+                . ' -> '
+                . $statusMsg
+                . ' (' . $responseTimeMs . 'ms, redirects: ' . $redirectCount . ')'
+                . $fallbackTag
+                . ($errorMessage ? ' | ' . $errorMessage : '')
+            );
         }
 
         $this->info('Gyors ellenőrzés kész.');
+        return self::SUCCESS;
+    }
+
+    private function getMonitorsToCheck(bool $force, int $intervalMinutes, int $batchSize): Collection
+    {
+        $query = Monitor::query()
+            ->where('is_active', true);
+
+        if (!$force) {
+            $cutoff = now()->subMinutes(max(0, $intervalMinutes));
+
+            $query->where(function ($q) use ($cutoff) {
+                $q->whereNull('last_checked_at')
+                    ->orWhere('last_checked_at', '<=', $cutoff);
+            })
+                ->orderBy('last_checked_at', 'asc')
+                ->orderBy('id', 'asc')
+                ->limit(max(1, $batchSize));
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * @return array<string, array{
+     *     status_code:int,
+     *     response_time_ms:int,
+     *     error_message:?string,
+     *     redirect_count:int
+     * }>
+     */
+    private function runPool(Collection $monitors, string $method, array $extraHeaders = []): array
+    {
+        $results = [];
+        $stats = [];
+
+        foreach ($monitors as $monitor) {
+            $results[(string) $monitor->id] = $this->emptyResult();
+        }
+
+        if ($monitors->isEmpty()) {
+            return $results;
+        }
+
+        $client = new Client([
+            'http_errors' => false,
+        ]);
+
+        $requests = function () use ($monitors, $client, $method, $extraHeaders, &$stats) {
+            foreach ($monitors as $monitor) {
+                /** @var Monitor $monitor */
+                $monitorId = (string) $monitor->id;
+
+                yield $monitorId => function () use ($client, $method, $monitor, $extraHeaders, &$stats, $monitorId) {
+                    try {
+                        return $client->requestAsync(
+                            $method,
+                            $monitor->url,
+                            $this->buildRequestOptions($monitorId, $stats, $extraHeaders)
+                        );
+                    } catch (Throwable $e) {
+                        return Create::rejectionFor($e);
+                    }
+                };
+            }
+        };
+
+        $pool = new Pool($client, $requests(), [
+            'concurrency' => $this->resolveConcurrency($monitors->count()),
+            'fulfilled' => function (ResponseInterface $response, string $monitorId) use (&$results, &$stats) {
+                $results[$monitorId] = [
+                    'status_code' => (int) $response->getStatusCode(),
+                    'response_time_ms' => (int) ($stats[$monitorId]['response_time_ms'] ?? 0),
+                    'error_message' => null,
+                    'redirect_count' => (int) ($stats[$monitorId]['redirect_count'] ?? $this->countRedirectHistoryHeader($response)),
+                ];
+            },
+            'rejected' => function ($reason, string $monitorId) use (&$results, &$stats) {
+                $results[$monitorId] = [
+                    'status_code' => 0,
+                    'response_time_ms' => (int) ($stats[$monitorId]['response_time_ms'] ?? 0),
+                    'error_message' => $this->normalizeErrorMessage($reason),
+                    'redirect_count' => (int) ($stats[$monitorId]['redirect_count'] ?? 0),
+                ];
+            },
+        ]);
+
+        try {
+            $pool->promise()->wait();
+        } catch (Throwable $e) {
+            // Ez ritka "globális" pool hiba esetére van.
+            foreach ($results as $monitorId => $result) {
+                if (($result['status_code'] ?? 0) === 0 && empty($result['error_message'])) {
+                    $results[$monitorId]['error_message'] = 'Pool failure: ' . $e->getMessage();
+                }
+            }
+        }
+
+        return $results;
+    }
+
+    private function buildRequestOptions(string $monitorId, array &$stats, array $extraHeaders = []): array
+    {
+        return [
+            'headers' => array_merge([
+                'User-Agent' => self::USER_AGENT,
+            ], $extraHeaders),
+            'connect_timeout' => self::CONNECT_TIMEOUT_SECONDS,
+            'timeout' => self::REQUEST_TIMEOUT_SECONDS,
+            'allow_redirects' => [
+                'max' => self::MAX_REDIRECTS,
+                'track_redirects' => true,
+            ],
+            'on_stats' => function (TransferStats $transferStats) use (&$stats, $monitorId) {
+                $handlerStats = $transferStats->getHandlerStats();
+
+                $stats[$monitorId] = [
+                    'response_time_ms' => (int) round($transferStats->getTransferTime() * 1000),
+                    'redirect_count' => isset($handlerStats['redirect_count'])
+                        ? (int) $handlerStats['redirect_count']
+                        : 0,
+                ];
+            },
+        ];
+    }
+
+    private function resolveConcurrency(int $monitorCount): int
+    {
+        $configured = (int) config('app.monitor_light_pool_concurrency', 10);
+
+        if ($configured <= 0) {
+            $configured = $monitorCount;
+        }
+
+        return max(1, min($configured, max(1, $monitorCount)));
+    }
+
+    /**
+     * @return int[]
+     */
+    private function resolveFallbackStatuses(): array
+    {
+        $configured = config('app.monitor_light_head_fallback_statuses', self::DEFAULT_HEAD_FALLBACK_STATUSES);
+
+        if (!is_array($configured) || empty($configured)) {
+            return self::DEFAULT_HEAD_FALLBACK_STATUSES;
+        }
+
+        return array_values(array_unique(array_map('intval', $configured)));
+    }
+
+    private function countRedirectHistoryHeader(ResponseInterface $response): int
+    {
+        $header = $response->getHeaderLine('X-Guzzle-Redirect-History');
+
+        if ($header === '') {
+            return 0;
+        }
+
+        $parts = array_filter(array_map('trim', explode(',', $header)));
+
+        return count($parts);
+    }
+
+    private function normalizeErrorMessage(mixed $reason): string
+    {
+        if ($reason instanceof Throwable) {
+            return $reason->getMessage();
+        }
+
+        if (is_string($reason) && $reason !== '') {
+            return $reason;
+        }
+
+        if (is_object($reason) && method_exists($reason, '__toString')) {
+            return (string) $reason;
+        }
+
+        return 'Unknown request error.';
+    }
+
+    /**
+     * @return array{
+     *     status_code:int,
+     *     response_time_ms:int,
+     *     error_message:?string,
+     *     redirect_count:int
+     * }
+     */
+    private function emptyResult(): array
+    {
+        return [
+            'status_code' => 0,
+            'response_time_ms' => 0,
+            'error_message' => null,
+            'redirect_count' => 0,
+        ];
     }
 }

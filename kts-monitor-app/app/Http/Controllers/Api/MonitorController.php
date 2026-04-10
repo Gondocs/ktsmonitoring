@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Monitor;
 use App\Models\MonitorLog;
-use App\Console\Commands\CheckSitesLight;
 use App\Services\OutageAlertService;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
@@ -13,6 +12,10 @@ use Illuminate\Http\Request;
 
 class MonitorController extends Controller
 {
+    private const LIGHT_USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
+    private const LIGHT_CONNECT_TIMEOUT_SECONDS = 3.0;
+    private const LIGHT_REQUEST_TIMEOUT_SECONDS = 15.0;
+
     // GET /api/sites
     public function index()
     {
@@ -266,18 +269,18 @@ class MonitorController extends Controller
         $responseTime = null;
         $error = null;
         $redirectCount = 0;
+        $start = microtime(true);
 
         try {
-            $start = microtime(true);
-            $response = Http::connectTimeout(CheckSitesLight::CONNECT_TIMEOUT_SECONDS)
-                ->timeout(CheckSitesLight::REQUEST_TIMEOUT_SECONDS)
+            $response = Http::connectTimeout(self::LIGHT_CONNECT_TIMEOUT_SECONDS)
+                ->timeout(self::LIGHT_REQUEST_TIMEOUT_SECONDS)
                 ->withOptions([
                     'allow_redirects' => [
                         'max' => 5,
                         'track_redirects' => true,
                     ],
                 ])
-                ->withHeaders(['User-Agent' => CheckSitesLight::USER_AGENT])
+                ->withHeaders(['User-Agent' => self::LIGHT_USER_AGENT])
                 ->head($monitor->url);
 
             $statusCode = $response->status();
@@ -287,7 +290,7 @@ class MonitorController extends Controller
                 $redirectUrls = array_filter(explode(', ', $redirectHistory));
                 $redirectCount = count($redirectUrls);
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $error = $e->getMessage();
         }
 
