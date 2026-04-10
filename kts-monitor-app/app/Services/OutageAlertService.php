@@ -15,7 +15,8 @@ class OutageAlertService
 
     public function maybeSendOutageAlert(Monitor $monitor, ?int $previousStatus, ?int $currentStatus, ?string $errorMessage = null): void
     {
-        $wasDown = $this->isDownStatus($previousStatus);
+        // Unknown previous status should not suppress the first outage alert.
+        $wasDown = $previousStatus !== null && $this->isDownStatus($previousStatus);
         $isDown = $this->isDownStatus($currentStatus);
 
         if (!$isDown || $wasDown) {

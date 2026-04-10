@@ -1,3 +1,5 @@
-<h2>KTS Monitor teszt email</h2>
-<p>Ez egy teszt uzenet annak ellenorzesere, hogy az SMTP beallitasok helyesen mukodnek.</p>
-<p><strong>Kuldes ideje:</strong> {{ $sentAt }}</p>
+<h2>KTS Monitor teszt e-mail</h2>
+<p>
+    Ez egy teszt üzenet annak ellenőrzésére, hogy az e-mail küldés és az SMTP beállítások helyesen működnek.
+</p>
+<p><strong>Küldés időpontja:</strong> {{ $sentAt }}</p>

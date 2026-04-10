@@ -14,10 +14,10 @@ class OutageTestMail extends Mailable
     public function build(): self
     {
         return $this
-            ->subject('KTS Monitor teszt email')
+            ->subject('KTS Monitor teszt e-mail')
             ->view('emails.outage-test')
             ->with([
-                'sentAt' => now()->format('Y-m-d H:i:s'),
+                'sentAt' => now()->format('Y.m.d. H:i:s'),
             ]);
     }
 }

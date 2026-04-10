@@ -1,12 +1,29 @@
-<h2>KTS Monitor riasztas</h2>
-<p>A monitorozott oldal jelenleg lealltnak tunik.</p>
+<h2>KTS Monitor riasztás</h2>
+
+<p>
+    A rendszer leállást vagy elérhetetlenséget észlelt egy monitorozott oldalon.
+</p>
+
 <ul>
-    <li><strong>Nev:</strong> {{ $monitor->name }}</li>
+    <li><strong>Oldal neve:</strong> {{ $monitor->name }}</li>
     <li><strong>URL:</strong> {{ $monitor->url }}</li>
-    <li><strong>Statusz kod:</strong> {{ $statusCode }}</li>
-    <li><strong>Ellenorzes ideje:</strong> {{ $checkedAt }}</li>
+    <li><strong>HTTP státuszkód:</strong> {{ $statusCode }}</li>
+    <li><strong>Ellenőrzés időpontja:</strong> {{ $checkedAt }}</li>
 </ul>
-@if(!empty($errorMessage))
-    <p><strong>Hiba:</strong> {{ $errorMessage }}</p>
+
+@if((int) $statusCode === 0)
+    <p>
+        <strong>Értelmezés:</strong> A <code>0</code> státuszkód általában azt jelenti,
+        hogy a céloldal nem volt elérhető (pl. DNS hiba, time-out, hálózati kapcsolat hiba,
+        vagy a szerver nem válaszolt időben).
+    </p>
 @endif
-<p>Keresd a reszletes informaciokat a monitor alkalmazasban.</p>
+
+@if(!empty($errorMessage))
+    <p><strong>Hiba részlete:</strong> {{ $errorMessage }}</p>
+@endif
+
+<p>
+    Kérlek ellenőrizd a szolgáltatás állapotát (szerver, hálózat, DNS, SSL),
+    majd a monitor alkalmazásban tekintsd meg a részletes naplókat.
+</p>

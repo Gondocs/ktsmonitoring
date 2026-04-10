@@ -26,13 +26,13 @@ class OutageDetectedMail extends Mailable
     public function build(): self
     {
         return $this
-            ->subject('KTS Monitor riasztas: oldal leallas')
+            ->subject('KTS Monitor riasztás: oldalleállás észlelve')
             ->view('emails.outage-detected')
             ->with([
                 'monitor' => $this->monitor,
                 'statusCode' => $this->statusCode,
                 'errorMessage' => $this->errorMessage,
-                'checkedAt' => now()->format('Y-m-d H:i:s'),
+                'checkedAt' => now()->format('Y.m.d. H:i:s'),
             ]);
     }
 }
