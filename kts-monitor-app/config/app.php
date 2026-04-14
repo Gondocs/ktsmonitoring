@@ -135,10 +135,19 @@ return [
     // Parallel HTTP requests for light checks
     'monitor_light_pool_concurrency' => env('MONITOR_LIGHT_POOL_CONCURRENCY', 10),
 
-    // HEAD status codes that should trigger GET fallback checks
-    'monitor_light_head_fallback_statuses' => array_map(
+    // GET (Range: bytes=0-0) status codes that should trigger full GET fallback checks
+    'monitor_light_get_fallback_statuses' => array_values(array_unique(array_map(
+        'intval',
+        explode(',', (string) env(
+            'MONITOR_LIGHT_GET_FALLBACK_STATUSES',
+            (string) env('MONITOR_LIGHT_HEAD_FALLBACK_STATUSES', '416')
+        ))
+    ))),
+
+    // Deprecated key kept for backward compatibility with older setups
+    'monitor_light_head_fallback_statuses' => array_values(array_unique(array_map(
         'intval',
         explode(',', (string) env('MONITOR_LIGHT_HEAD_FALLBACK_STATUSES', '405'))
-    ),
+    ))),
 
 ];

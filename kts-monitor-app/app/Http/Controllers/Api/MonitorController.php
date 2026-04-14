@@ -15,6 +15,7 @@ class MonitorController extends Controller
     private const LIGHT_USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
     private const LIGHT_CONNECT_TIMEOUT_SECONDS = 3.0;
     private const LIGHT_REQUEST_TIMEOUT_SECONDS = 15.0;
+    private const LIGHT_DEFAULT_GET_FALLBACK_STATUSES = [416];
 
     // GET /api/sites
     public function index()
@@ -280,10 +281,32 @@ class MonitorController extends Controller
                         'track_redirects' => true,
                     ],
                 ])
-                ->withHeaders(['User-Agent' => self::LIGHT_USER_AGENT])
-                ->head($monitor->url);
+                ->withHeaders([
+                    'User-Agent' => self::LIGHT_USER_AGENT,
+                    'Range' => 'bytes=0-0',
+                    'Accept-Encoding' => 'identity',
+                ])
+                ->get($monitor->url);
 
             $statusCode = $response->status();
+
+            $fallbackStatuses = $this->resolveLightGetFallbackStatuses();
+            if (in_array($statusCode, $fallbackStatuses, true)) {
+                $response = Http::connectTimeout(self::LIGHT_CONNECT_TIMEOUT_SECONDS)
+                    ->timeout(self::LIGHT_REQUEST_TIMEOUT_SECONDS)
+                    ->withOptions([
+                        'allow_redirects' => [
+                            'max' => 5,
+                            'track_redirects' => true,
+                        ],
+                    ])
+                    ->withHeaders([
+                        'User-Agent' => self::LIGHT_USER_AGENT,
+                    ])
+                    ->get($monitor->url);
+
+                $statusCode = $response->status();
+            }
 
             $redirectHistory = $response->header('X-Guzzle-Redirect-History');
             if ($redirectHistory !== null) {
@@ -332,5 +355,23 @@ class MonitorController extends Controller
             'message' => 'Site light-checked',
             'data' => $monitor,
         ]);
+    }
+
+    /**
+     * @return int[]
+     */
+    private function resolveLightGetFallbackStatuses(): array
+    {
+        $configured = config('app.monitor_light_get_fallback_statuses');
+
+        if (!is_array($configured) || empty($configured)) {
+            $configured = config('app.monitor_light_head_fallback_statuses', self::LIGHT_DEFAULT_GET_FALLBACK_STATUSES);
+        }
+
+        if (!is_array($configured) || empty($configured)) {
+            return self::LIGHT_DEFAULT_GET_FALLBACK_STATUSES;
+        }
+
+        return array_values(array_unique(array_map('intval', $configured)));
     }
 }

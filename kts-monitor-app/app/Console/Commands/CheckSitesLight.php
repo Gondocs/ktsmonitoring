@@ -18,13 +18,13 @@ use Throwable;
 class CheckSitesLight extends Command
 {
     protected $signature = 'sites:check-light {--force : Run checks ignoring light interval limit}';
-    protected $description = 'Gyors rendelkezésre állás ellenőrzés (parallel HEAD + optional GET fallback)';
+    protected $description = 'Gyors rendelkezésre állás ellenőrzés (parallel GET range + optional full GET fallback)';
 
     private const USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
     private const CONNECT_TIMEOUT_SECONDS = 10.0;
     private const REQUEST_TIMEOUT_SECONDS = 30.0;
     private const MAX_REDIRECTS = 5;
-    private const DEFAULT_HEAD_FALLBACK_STATUSES = [405];
+    private const DEFAULT_GET_FALLBACK_STATUSES = [416];
 
     public function handle(): int
     {
@@ -46,12 +46,12 @@ class CheckSitesLight extends Command
             return self::SUCCESS;
         }
 
-        $this->info('Gyors ellenőrzés indítása ' . $monitors->count() . ' monitoron (parallel HEAD)...');
+        $this->info('Gyors ellenőrzés indítása ' . $monitors->count() . ' monitoron (parallel GET range)...');
 
         $outageAlertService = app(OutageAlertService::class);
         $outageAlertService->beginBatch();
 
-        // Első próbálkozás minden monitorra (HEAD + opcionális GET fallback).
+        // Első próbálkozás minden monitorra (GET Range: bytes=0-0 + opcionális teljes GET fallback).
         $attemptResults = $this->runAttempt($monitors, $fallbackStatuses, true);
 
         // További próbálkozások csak a még mindig down monitorokra menjenek.
@@ -155,10 +155,13 @@ class CheckSitesLight extends Command
             return [];
         }
 
-        $headResults = $this->runPool($monitors, 'HEAD');
+        $rangeGetResults = $this->runPool($monitors, 'GET', [
+            'Range' => 'bytes=0-0',
+            'Accept-Encoding' => 'identity',
+        ]);
 
-        $fallbackMonitors = $monitors->filter(function (Monitor $monitor) use ($headResults, $fallbackStatuses) {
-            $result = $headResults[(string) $monitor->id] ?? null;
+        $fallbackMonitors = $monitors->filter(function (Monitor $monitor) use ($rangeGetResults, $fallbackStatuses) {
+            $result = $rangeGetResults[(string) $monitor->id] ?? null;
 
             if ($result === null) {
                 return false;
@@ -170,20 +173,17 @@ class CheckSitesLight extends Command
         $fallbackResults = [];
         if ($fallbackMonitors->isNotEmpty()) {
             if ($announceFallback) {
-                $this->info('GET fallback indul ' . $fallbackMonitors->count() . ' monitorra...');
+                $this->info('Teljes GET fallback indul ' . $fallbackMonitors->count() . ' monitorra...');
             }
 
-            $fallbackResults = $this->runPool($fallbackMonitors, 'GET', [
-                'Range' => 'bytes=0-0',
-                'Accept-Encoding' => 'identity',
-            ]);
+            $fallbackResults = $this->runPool($fallbackMonitors, 'GET');
         }
 
         $results = [];
         foreach ($monitors as $monitor) {
             /** @var Monitor $monitor */
             $monitorId = (string) $monitor->id;
-            $result = $headResults[$monitorId] ?? $this->emptyResult();
+            $result = $rangeGetResults[$monitorId] ?? $this->emptyResult();
 
             if (isset($fallbackResults[$monitorId])) {
                 $result = $fallbackResults[$monitorId];
@@ -337,10 +337,15 @@ class CheckSitesLight extends Command
      */
     private function resolveFallbackStatuses(): array
     {
-        $configured = config('app.monitor_light_head_fallback_statuses', self::DEFAULT_HEAD_FALLBACK_STATUSES);
+        $configured = config('app.monitor_light_get_fallback_statuses');
 
         if (!is_array($configured) || empty($configured)) {
-            return self::DEFAULT_HEAD_FALLBACK_STATUSES;
+            // Backward compatibility with older config key.
+            $configured = config('app.monitor_light_head_fallback_statuses', self::DEFAULT_GET_FALLBACK_STATUSES);
+        }
+
+        if (!is_array($configured) || empty($configured)) {
+            return self::DEFAULT_GET_FALLBACK_STATUSES;
         }
 
         return array_values(array_unique(array_map('intval', $configured)));
