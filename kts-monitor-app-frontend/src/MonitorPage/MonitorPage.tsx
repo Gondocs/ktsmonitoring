@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   FiActivity,
   FiAlertTriangle,
@@ -16,6 +22,7 @@ import {
   FiSettings,
   FiShield,
   FiTrash2,
+  FiUpload,
   FiMaximize2,
   FiX,
   FiZap,
@@ -68,10 +75,19 @@ import {
 } from "./timeUtils.ts";
 
 type MainView = "monitorok" | "globalisNaplok";
+type GlobalLogsTab = "all" | "outages";
 
 type GlobalLogEntry = MonitorLog & {
   monitor_name: string;
   monitor_url: string;
+};
+
+type ImportResultRow = {
+  lineNumber: number;
+  url: string;
+  name: string;
+  status: "success" | "error";
+  message: string;
 };
 
 const getGlobalLogKey = (log: Pick<GlobalLogEntry, "monitor_id" | "id">) =>
@@ -122,8 +138,14 @@ const safeHost = (url: string) => {
   }
 };
 
+const isStatusUp = (status: number | null | undefined) =>
+  status != null && status > 0 && status < 400;
+
+const isOutageStatus = (status: number | null | undefined) =>
+  status == null || status <= 0 || status >= 400;
+
 const getStatusColor = (m: Monitor) => {
-  if (m.last_status === 200) {
+  if (isStatusUp(m.last_status)) {
     if ((m.last_response_time_ms ?? 0) > 5000) return "#f59e0b";
     if ((m.stability_score ?? 100) < 67) return "#f59e0b";
     return "#16a34a";
@@ -241,6 +263,7 @@ const buildGlobalOutageChart = (logs: GlobalLogEntry[], range: ChartRange) => {
 
 export const MonitorPage: React.FC = () => {
   const { user, logout } = useAuth();
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [mainView, setMainView] = useState<MainView>("monitorok");
 
@@ -278,6 +301,8 @@ export const MonitorPage: React.FC = () => {
   const [globalLogs, setGlobalLogs] = useState<GlobalLogEntry[]>([]);
   const [globalLogsLoading, setGlobalLogsLoading] = useState(false);
   const [globalLogsError, setGlobalLogsError] = useState<string | null>(null);
+  const [globalLogsTab, setGlobalLogsTab] = useState<GlobalLogsTab>("all");
+  const [outagesDays, setOutagesDays] = useState<number>(7);
   const [globalLogsScope, setGlobalLogsScope] = useState<string>("all");
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalChartRange, setGlobalChartRange] = useState<ChartRange>("7d");
@@ -286,6 +311,10 @@ export const MonitorPage: React.FC = () => {
   const [selectedGlobalLogKey, setSelectedGlobalLogKey] = useState<
     string | null
   >(null);
+  const [selectedDetailHeatmapLog, setSelectedDetailHeatmapLog] =
+    useState<MonitorLog | null>(null);
+  const [selectedGlobalHeatmapLog, setSelectedGlobalHeatmapLog] =
+    useState<GlobalLogEntry | null>(null);
   const [expandedPanel, setExpandedPanel] = useState<ExpandedPanel>(null);
 
   const [logModalMonitor, setLogModalMonitor] = useState<Monitor | null>(null);
@@ -319,6 +348,16 @@ export const MonitorPage: React.FC = () => {
   const [editName, setEditName] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
   const [editSaving, setEditSaving] = useState(false);
+  const [importingSites, setImportingSites] = useState(false);
+  const [lastImportFileName, setLastImportFileName] = useState<string | null>(
+    null,
+  );
+  const [lastImportSummary, setLastImportSummary] = useState<{
+    total: number;
+    success: number;
+    failed: number;
+  } | null>(null);
+  const [lastImportRows, setLastImportRows] = useState<ImportResultRow[]>([]);
 
   const loadSites = async () => {
     setLoading(true);
@@ -364,9 +403,7 @@ export const MonitorPage: React.FC = () => {
     }
 
     if (monitorListFilter === "offline") {
-      return filteredSites.filter(
-        (s) => (s.last_status ?? 0) >= 400 || s.last_status == null,
-      );
+      return filteredSites.filter((s) => isOutageStatus(s.last_status));
     }
 
     return filteredSites;
@@ -419,6 +456,7 @@ export const MonitorPage: React.FC = () => {
   useEffect(() => {
     if (sites.length === 0) {
       setSelectedMonitorId(null);
+      setSelectedDetailHeatmapLog(null);
       return;
     }
 
@@ -427,6 +465,10 @@ export const MonitorPage: React.FC = () => {
       setSelectedMonitorId(sites[0].id);
     }
   }, [sites, selectedMonitorId]);
+
+  useEffect(() => {
+    setSelectedDetailHeatmapLog(null);
+  }, [selectedMonitorId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -541,6 +583,10 @@ export const MonitorPage: React.FC = () => {
     setSelectedGlobalLogKey(null);
   }, [globalLogsScope, globalSearch]);
 
+  useEffect(() => {
+    setSelectedGlobalHeatmapLog(null);
+  }, [globalLogsScope, globalSearch, globalLogsTab, outagesDays]);
+
   const globalFilteredLogs = useMemo(() => {
     const search = globalSearch.trim().toLowerCase();
     if (!search) return globalLogs;
@@ -571,6 +617,19 @@ export const MonitorPage: React.FC = () => {
     );
   }, [globalFilteredLogs, selectedGlobalLogKey]);
 
+  const outageLogsForTable = useMemo(() => {
+    const fromTs = Date.now() - outagesDays * 24 * 60 * 60 * 1000;
+
+    return globalFilteredLogs.filter((log) => {
+      const ts = parseMonitorDate(log.checked_at || log.created_at)?.getTime();
+      if (!ts || ts < fromTs) {
+        return false;
+      }
+
+      return isOutageStatus(log.status_code);
+    });
+  }, [globalFilteredLogs, outagesDays]);
+
   const detailResponseChartData = useMemo(
     () => buildMonitorResponseChart(selectedMonitorLogs, detailChartRange),
     [selectedMonitorLogs, detailChartRange],
@@ -584,9 +643,7 @@ export const MonitorPage: React.FC = () => {
   const stats = useMemo(() => {
     const total = sites.length;
     const active = sites.filter((s) => s.is_active).length;
-    const offline = sites.filter(
-      (s) => (s.last_status ?? 0) >= 400 || s.last_status == null,
-    ).length;
+    const offline = sites.filter((s) => isOutageStatus(s.last_status)).length;
     const criticalSsl = sites.filter(
       (s) => s.ssl_days_remaining != null && s.ssl_days_remaining <= 7,
     ).length;
@@ -690,6 +747,146 @@ export const MonitorPage: React.FC = () => {
     } catch (err: any) {
       alert(err.message || "Nem sikerült hozzáadni a weboldalt.");
     }
+  };
+
+  const triggerImportFilePicker = () => {
+    if (importingSites) return;
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportSitesFromFile = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setLastImportFileName(file.name);
+    setLastImportSummary(null);
+    setLastImportRows([]);
+    setImportingSites(true);
+
+    try {
+      const text = await file.text();
+      const rows = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      if (rows.length === 0) {
+        setLastImportSummary({ total: 0, success: 0, failed: 0 });
+        setLastImportRows([
+          {
+            lineNumber: 0,
+            url: "",
+            name: "",
+            status: "error",
+            message: "A fájl üres.",
+          },
+        ]);
+        return;
+      }
+
+      let successCount = 0;
+      const importRows: ImportResultRow[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const line = rows[i];
+        const [rawUrl, ...nameParts] = line.split("\t");
+        const sourceUrl = (rawUrl || "").trim();
+        const sourceName = nameParts.join("\t").trim();
+
+        if (!sourceUrl) {
+          importRows.push({
+            lineNumber: i + 1,
+            url: "",
+            name: sourceName,
+            status: "error",
+            message: "Hiányzó URL.",
+          });
+          continue;
+        }
+
+        let normalizedUrl = sourceUrl;
+        if (!/^https?:\/\//i.test(normalizedUrl)) {
+          normalizedUrl = `https://${normalizedUrl}`;
+        }
+
+        try {
+          await createSite({
+            url: normalizedUrl,
+            name: sourceName || undefined,
+          });
+          successCount++;
+          importRows.push({
+            lineNumber: i + 1,
+            url: normalizedUrl,
+            name: sourceName,
+            status: "success",
+            message: "Sikeresen hozzáadva.",
+          });
+        } catch (err: any) {
+          importRows.push({
+            lineNumber: i + 1,
+            url: normalizedUrl,
+            name: sourceName,
+            status: "error",
+            message: err?.message || "Nem sikerült hozzáadni.",
+          });
+        }
+      }
+
+      await loadSites();
+
+      const failedCount = importRows.filter((r) => r.status === "error").length;
+      setLastImportSummary({
+        total: rows.length,
+        success: successCount,
+        failed: failedCount,
+      });
+      setLastImportRows(importRows);
+    } finally {
+      event.target.value = "";
+      setImportingSites(false);
+    }
+  };
+
+  const handleExportImportErrorsCsv = () => {
+    const failedRows = lastImportRows.filter((row) => row.status === "error");
+    if (failedRows.length === 0) {
+      return;
+    }
+
+    const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
+
+    const header = ["Sor", "URL", "Nev", "Hiba"];
+    const lines = [
+      header.join(","),
+      ...failedRows.map((row) =>
+        [
+          String(row.lineNumber > 0 ? row.lineNumber : ""),
+          row.url,
+          row.name,
+          row.message,
+        ]
+          .map((cell) => escapeCsv(cell))
+          .join(","),
+      ),
+    ];
+
+    const csvContent = "\uFEFF" + lines.join("\n");
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const dateSuffix = new Date().toISOString().slice(0, 10);
+
+    link.href = objectUrl;
+    link.download = `import-hibak-${dateSuffix}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(objectUrl);
   };
 
   const handleDelete = async (id: number) => {
@@ -939,13 +1136,18 @@ export const MonitorPage: React.FC = () => {
       <div className="relative flex min-h-screen">
         <aside className="hidden lg:flex w-72 flex-col justify-between border-r border-slate-200 bg-white/90 backdrop-blur-sm sticky top-0 h-screen">
           <div className="p-5 space-y-6">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => setMainView("monitorok")}
+              className="w-full rounded-2xl border border-slate-200 bg-white p-4 flex items-center justify-center hover:bg-slate-50 transition"
+              title="Vissza a monitorok áttekintéséhez"
+            >
               <img
                 src="/ktsonlinelogo.png"
                 alt="KTS Online"
                 className="h-20 w-auto max-w-full lg:h-[200px]"
               />
-            </div>
+            </button>
 
             <nav className="space-y-2 text-sm">
               <button
@@ -1354,14 +1556,6 @@ export const MonitorPage: React.FC = () => {
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => openLogsModal(m)}
-                                        className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-100"
-                                        title="Naplók"
-                                      >
-                                        <FiFileText className="h-3.5 w-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
                                         onClick={() => startEditMonitor(m)}
                                         className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-100"
                                         title="Szerkesztés"
@@ -1435,7 +1629,7 @@ export const MonitorPage: React.FC = () => {
                               className="mt-1 font-bold"
                               style={{ color: getStatusColor(selectedMonitor) }}
                             >
-                              {selectedMonitor.last_status === 200
+                              {isStatusUp(selectedMonitor.last_status)
                                 ? "Elérhető"
                                 : "Hiba"}
                             </p>
@@ -1648,6 +1842,9 @@ export const MonitorPage: React.FC = () => {
                               logs={selectedMonitorLogs}
                               title="Kimaradások"
                               range={detailHeatmapRange}
+                              onCellClick={(log) =>
+                                setSelectedDetailHeatmapLog(log as MonitorLog)
+                              }
                             />
                           </div>
                         </div>
@@ -1692,30 +1889,143 @@ export const MonitorPage: React.FC = () => {
                     </button>
 
                     {addMonitorOpen && (
-                      <form onSubmit={handleAdd} className="space-y-3">
+                      <div className="space-y-3">
+                        <form onSubmit={handleAdd} className="space-y-3">
+                          <input
+                            type="text"
+                            value={newUrl}
+                            onChange={(e) => setNewUrl(e.target.value)}
+                            required
+                            placeholder="https://pelda.hu"
+                            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
+                          />
+                          <input
+                            type="text"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                            placeholder="Név (opcionális)"
+                            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            className="w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition"
+                            style={{ backgroundColor: BRAND_BLUE }}
+                          >
+                            Hozzáadás
+                          </button>
+                        </form>
+
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <span className="h-px flex-1 bg-slate-200" />
+                          vagy
+                          <span className="h-px flex-1 bg-slate-200" />
+                        </div>
+
                         <input
-                          type="text"
-                          value={newUrl}
-                          onChange={(e) => setNewUrl(e.target.value)}
-                          required
-                          placeholder="https://pelda.hu"
-                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
+                          ref={importFileInputRef}
+                          type="file"
+                          accept=".txt,text/plain"
+                          className="hidden"
+                          onChange={handleImportSitesFromFile}
                         />
-                        <input
-                          type="text"
-                          value={newName}
-                          onChange={(e) => setNewName(e.target.value)}
-                          placeholder="Név (opcionális)"
-                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none"
-                        />
+
                         <button
-                          type="submit"
-                          className="w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition"
-                          style={{ backgroundColor: BRAND_BLUE }}
+                          type="button"
+                          onClick={triggerImportFilePicker}
+                          disabled={importingSites}
+                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
                         >
-                          Hozzáadás
+                          <FiUpload className="h-4 w-4" />
+                          {importingSites
+                            ? "Import folyamatban..."
+                            : "Weboldalak importálása .txt fájlból"}
                         </button>
-                      </form>
+
+                        <p className="text-xs text-slate-500">
+                          Formátum soronként: URL Név (tabulátorral elválasztva,
+                          a név opcionális).
+                        </p>
+
+                        {lastImportSummary && (
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                            <p className="text-xs font-semibold text-slate-800">
+                              Import eredmény
+                              {lastImportFileName
+                                ? `: ${lastImportFileName}`
+                                : ""}
+                            </p>
+
+                            <div className="grid grid-cols-3 gap-2 text-[11px]">
+                              <div className="rounded-lg bg-white border border-slate-200 px-2 py-1.5 text-slate-600">
+                                Összes sor:{" "}
+                                <strong>{lastImportSummary.total}</strong>
+                              </div>
+                              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-1.5 text-emerald-700">
+                                Sikeres:{" "}
+                                <strong>{lastImportSummary.success}</strong>
+                              </div>
+                              <div className="rounded-lg bg-red-50 border border-red-200 px-2 py-1.5 text-red-700">
+                                Hibás:{" "}
+                                <strong>{lastImportSummary.failed}</strong>
+                              </div>
+                            </div>
+
+                            {lastImportSummary.failed > 0 && (
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={handleExportImportErrorsCsv}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                                >
+                                  <FiUpload className="h-3.5 w-3.5" />
+                                  Hibás sorok exportálása CSV-be
+                                </button>
+                              </div>
+                            )}
+
+                            {lastImportRows.length > 0 && (
+                              <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white">
+                                <table className="min-w-full text-left text-[11px]">
+                                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
+                                    <tr>
+                                      <th className="px-2 py-1.5">Sor</th>
+                                      <th className="px-2 py-1.5">URL</th>
+                                      <th className="px-2 py-1.5">Név</th>
+                                      <th className="px-2 py-1.5">Eredmény</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {lastImportRows.map((row, index) => (
+                                      <tr key={`${row.lineNumber}-${index}`}>
+                                        <td className="px-2 py-1.5 font-mono text-slate-600">
+                                          {row.lineNumber > 0
+                                            ? row.lineNumber
+                                            : "-"}
+                                        </td>
+                                        <td className="px-2 py-1.5 break-all text-slate-700">
+                                          {row.url || "-"}
+                                        </td>
+                                        <td className="px-2 py-1.5 break-all text-slate-700">
+                                          {row.name || "-"}
+                                        </td>
+                                        <td
+                                          className={`px-2 py-1.5 ${
+                                            row.status === "success"
+                                              ? "text-emerald-700"
+                                              : "text-red-700"
+                                          }`}
+                                        >
+                                          {row.message}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -1802,6 +2112,45 @@ export const MonitorPage: React.FC = () => {
                     />
                     Globális naplók frissítése
                   </button>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGlobalLogsTab("all")}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                      globalLogsTab === "all"
+                        ? "border-[#073a59] bg-[#073a59]/10 text-[#073a59]"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Összes napló
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGlobalLogsTab("outages")}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                      globalLogsTab === "outages"
+                        ? "border-[#af272f] bg-[#af272f]/10 text-[#af272f]"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Kimaradások
+                  </button>
+
+                  {globalLogsTab === "outages" && (
+                    <select
+                      value={outagesDays}
+                      onChange={(e) => setOutagesDays(Number(e.target.value))}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                    >
+                      <option value={1}>Elmúlt 1 nap</option>
+                      <option value={3}>Elmúlt 3 nap</option>
+                      <option value={7}>Elmúlt 7 nap</option>
+                      <option value={14}>Elmúlt 14 nap</option>
+                      <option value={30}>Elmúlt 30 nap</option>
+                    </select>
+                  )}
                 </div>
 
                 {globalLogsError && (
@@ -1909,9 +2258,11 @@ export const MonitorPage: React.FC = () => {
                     logs={globalFilteredLogs}
                     title="Kimaradások"
                     range={globalHeatmapRange}
-                    onCellClick={(log) =>
-                      handleSelectGlobalLog(log as GlobalLogEntry)
-                    }
+                    onCellClick={(log) => {
+                      const globalLog = log as GlobalLogEntry;
+                      setSelectedGlobalHeatmapLog(globalLog);
+                      handleSelectGlobalLog(globalLog);
+                    }}
                   />
                 </div>
               </div>
@@ -1919,11 +2270,13 @@ export const MonitorPage: React.FC = () => {
               <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="border-b border-slate-200 px-4 py-3">
                   <p className="text-sm font-semibold text-slate-800">
-                    Globális naplólista
+                    {globalLogsTab === "all"
+                      ? "Globális naplólista"
+                      : `Kimaradások listája (${outagesDays} nap)`}
                   </p>
                 </div>
 
-                {selectedGlobalLogKey && (
+                {globalLogsTab === "all" && selectedGlobalLogKey && (
                   <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
                     <span>
                       Kijelölt log:{" "}
@@ -1943,11 +2296,17 @@ export const MonitorPage: React.FC = () => {
                   <div className="py-14 flex items-center justify-center">
                     <ClipLoader color={BRAND_BLUE} size={28} />
                   </div>
-                ) : globalLogsForTable.length === 0 ? (
+                ) : globalLogsTab === "all" &&
+                  globalLogsForTable.length === 0 ? (
                   <div className="py-12 text-center text-sm text-slate-500">
                     Nincs megjeleníthető globális naplóbejegyzés.
                   </div>
-                ) : (
+                ) : globalLogsTab === "outages" &&
+                  outageLogsForTable.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-slate-500">
+                    Nincs kimaradás az elmúlt {outagesDays} napban.
+                  </div>
+                ) : globalLogsTab === "all" ? (
                   <div className="overflow-auto">
                     <table className="min-w-full text-left text-sm">
                       <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
@@ -1961,8 +2320,7 @@ export const MonitorPage: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {globalLogsForTable.map((log) => {
-                          const hasError =
-                            !log.status_code || log.status_code >= 400;
+                          const hasError = isOutageStatus(log.status_code);
                           const rowKey = getGlobalLogKey(log);
                           const selectedRow = rowKey === selectedGlobalLogKey;
                           return (
@@ -2013,6 +2371,79 @@ export const MonitorPage: React.FC = () => {
                               </td>
                               <td className="px-4 py-3 text-xs text-slate-600 break-all">
                                 {log.error_message || "OK"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                        <tr>
+                          <th className="px-4 py-3">Időpont</th>
+                          <th className="px-4 py-3">Webhely</th>
+                          <th className="px-4 py-3">HTTP státusz</th>
+                          <th className="px-4 py-3">Válaszidő</th>
+                          <th className="px-4 py-3">Hiba</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {outageLogsForTable.map((log) => {
+                          const rowKey = getGlobalLogKey(log);
+
+                          return (
+                            <tr
+                              key={rowKey}
+                              onClick={() => {
+                                setSelectedGlobalHeatmapLog(log);
+                                handleSelectGlobalLog(log);
+                              }}
+                              className="cursor-pointer hover:bg-slate-50"
+                            >
+                              <td className="px-4 py-3 text-xs text-slate-600 font-mono">
+                                {formatDateTimeHu(
+                                  log.checked_at || log.created_at,
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="min-w-[220px]">
+                                  <p className="font-semibold text-slate-800">
+                                    {log.monitor_name}
+                                  </p>
+                                  <a
+                                    href={log.monitor_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-xs inline-flex items-center gap-1"
+                                    style={{ color: BRAND_BLUE }}
+                                  >
+                                    {safeHost(log.monitor_url)}
+                                    <FiExternalLink className="h-3 w-3" />
+                                  </a>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className="inline-flex rounded-full px-2 py-1 text-xs font-bold"
+                                  style={{
+                                    color: BRAND_RED,
+                                    backgroundColor: `${BRAND_RED}18`,
+                                  }}
+                                >
+                                  {log.status_code ?? "HIBA"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-xs font-mono text-slate-700">
+                                {log.response_time_ms != null
+                                  ? `${log.response_time_ms} ms`
+                                  : "Nincs adat"}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-600 break-all">
+                                {log.error_message ||
+                                  "Állapotkód alapú kimaradás"}
                               </td>
                             </tr>
                           );
@@ -2224,12 +2655,59 @@ export const MonitorPage: React.FC = () => {
               )}
 
               {expandedPanel === "detailHeatmap" && (
-                <ActivityHeatmap
-                  logs={selectedMonitorLogs}
-                  title="Kimaradások"
-                  range={detailHeatmapRange}
-                  cellSize="lg"
-                />
+                <div className="space-y-4">
+                  <ActivityHeatmap
+                    logs={selectedMonitorLogs}
+                    title="Kimaradások"
+                    range={detailHeatmapRange}
+                    cellSize="lg"
+                    onCellClick={(log) =>
+                      setSelectedDetailHeatmapLog(log as MonitorLog)
+                    }
+                  />
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                    <p className="font-semibold text-slate-900">
+                      {selectedDetailHeatmapLog
+                        ? "Kiválasztott napló részletei"
+                        : "Kattints egy kockára a részletes naplóadatokhoz."}
+                    </p>
+
+                    {selectedDetailHeatmapLog && (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <div>
+                          <p className="text-slate-500">Időpont</p>
+                          <p className="font-mono">
+                            {formatDateTimeHu(
+                              selectedDetailHeatmapLog.checked_at ||
+                                selectedDetailHeatmapLog.created_at,
+                            )}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-500">HTTP státusz</p>
+                          <p className="font-semibold">
+                            {selectedDetailHeatmapLog.status_code ?? "HIBA"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-500">Válaszidő</p>
+                          <p className="font-mono">
+                            {selectedDetailHeatmapLog.response_time_ms != null
+                              ? `${selectedDetailHeatmapLog.response_time_ms} ms`
+                              : "Nincs adat"}
+                          </p>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <p className="text-slate-500">Részletek</p>
+                          <p className="break-all">
+                            {selectedDetailHeatmapLog.error_message || "OK"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
 
               {expandedPanel === "globalTrend" && (
@@ -2281,15 +2759,80 @@ export const MonitorPage: React.FC = () => {
               )}
 
               {expandedPanel === "globalHeatmap" && (
-                <ActivityHeatmap
-                  logs={globalFilteredLogs}
-                  title="Kimaradások"
-                  range={globalHeatmapRange}
-                  cellSize="lg"
-                  onCellClick={(log) =>
-                    handleSelectGlobalLog(log as GlobalLogEntry)
-                  }
-                />
+                <div className="space-y-4">
+                  <ActivityHeatmap
+                    logs={globalFilteredLogs}
+                    title="Kimaradások"
+                    range={globalHeatmapRange}
+                    cellSize="lg"
+                    onCellClick={(log) => {
+                      const globalLog = log as GlobalLogEntry;
+                      setSelectedGlobalHeatmapLog(globalLog);
+                      handleSelectGlobalLog(globalLog);
+                    }}
+                  />
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                    <p className="font-semibold text-slate-900">
+                      {selectedGlobalHeatmapLog
+                        ? "Kiválasztott globális napló részletei"
+                        : "Kattints egy kockára a részletes naplóadatokhoz."}
+                    </p>
+
+                    {selectedGlobalHeatmapLog && (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <div>
+                          <p className="text-slate-500">Időpont</p>
+                          <p className="font-mono">
+                            {formatDateTimeHu(
+                              selectedGlobalHeatmapLog.checked_at ||
+                                selectedGlobalHeatmapLog.created_at,
+                            )}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-500">Monitor</p>
+                          <p className="font-semibold">
+                            {selectedGlobalHeatmapLog.monitor_name}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-500">HTTP státusz</p>
+                          <p className="font-semibold">
+                            {selectedGlobalHeatmapLog.status_code ?? "HIBA"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-500">Válaszidő</p>
+                          <p className="font-mono">
+                            {selectedGlobalHeatmapLog.response_time_ms != null
+                              ? `${selectedGlobalHeatmapLog.response_time_ms} ms`
+                              : "Nincs adat"}
+                          </p>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <p className="text-slate-500">URL</p>
+                          <a
+                            href={selectedGlobalHeatmapLog.monitor_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 break-all"
+                            style={{ color: BRAND_BLUE }}
+                          >
+                            {selectedGlobalHeatmapLog.monitor_url}
+                            <FiExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <p className="text-slate-500">Részletek</p>
+                          <p className="break-all">
+                            {selectedGlobalHeatmapLog.error_message || "OK"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           </div>
