@@ -21,8 +21,8 @@ class CheckSitesLight extends Command
     protected $description = 'Gyors rendelkezésre állás ellenőrzés (parallel HEAD + optional GET fallback)';
 
     private const USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
-    private const CONNECT_TIMEOUT_SECONDS = 3.0;
-    private const REQUEST_TIMEOUT_SECONDS = 15.0;
+    private const CONNECT_TIMEOUT_SECONDS = 10.0;
+    private const REQUEST_TIMEOUT_SECONDS = 30.0;
     private const MAX_REDIRECTS = 5;
     private const DEFAULT_HEAD_FALLBACK_STATUSES = [405];
 
@@ -32,6 +32,9 @@ class CheckSitesLight extends Command
 
         $defaultInterval = (int) config('app.monitor_interval_light_minutes', 5);
         $intervalMinutes = (int) Setting::get('monitor_interval_light_minutes', $defaultInterval);
+        $defaultRetryAttempts = (int) config('app.monitor_retry_attempts', 3);
+        $maxAttempts = (int) Setting::get('monitor_retry_attempts', $defaultRetryAttempts);
+        $maxAttempts = max(1, min($maxAttempts, 10));
 
         $batchSize = (int) config('app.monitor_light_batch_size', 15);
         $fallbackStatuses = $this->resolveFallbackStatuses();
@@ -46,11 +49,114 @@ class CheckSitesLight extends Command
         $this->info('Gyors ellenőrzés indítása ' . $monitors->count() . ' monitoron (parallel HEAD)...');
 
         $outageAlertService = app(OutageAlertService::class);
+        $outageAlertService->beginBatch();
 
-        // 1) HEAD ellenőrzések párhuzamosan
+        // Első próbálkozás minden monitorra (HEAD + opcionális GET fallback).
+        $attemptResults = $this->runAttempt($monitors, $fallbackStatuses, true);
+
+        // További próbálkozások csak a még mindig down monitorokra menjenek.
+        for ($attempt = 2; $attempt <= $maxAttempts; $attempt++) {
+            $stillDown = $monitors->filter(function (Monitor $monitor) use ($attemptResults) {
+                $monitorId = (string) $monitor->id;
+                $statusCode = (int) ($attemptResults[$monitorId]['status_code'] ?? 0);
+
+                return $this->isDownStatus($statusCode);
+            })->values();
+
+            if ($stillDown->isEmpty()) {
+                break;
+            }
+
+            $this->info('Újrapróbálás ' . $attempt . '/' . $maxAttempts . ' (' . $stillDown->count() . ' monitor)...');
+
+            $retryResults = $this->runAttempt($stillDown, $fallbackStatuses, false);
+            foreach ($retryResults as $monitorId => $retryResult) {
+                $attemptResults[$monitorId] = $retryResult;
+            }
+        }
+
+        $checkedAt = now();
+
+        try {
+            foreach ($monitors as $monitor) {
+                /** @var Monitor $monitor */
+                $monitorId = (string) $monitor->id;
+                $previousStatus = $monitor->last_status;
+
+                $result = $attemptResults[$monitorId] ?? $this->emptyResult();
+                $result['used_fallback'] = (bool) ($result['used_fallback'] ?? false);
+
+                $statusCode = (int) ($result['status_code'] ?? 0);
+                $responseTimeMs = (int) ($result['response_time_ms'] ?? 0);
+                $errorMessage = $result['error_message'] ?? null;
+                $redirectCount = (int) ($result['redirect_count'] ?? 0);
+
+                MonitorLog::create([
+                    'monitor_id' => $monitor->id,
+                    'status_code' => $statusCode,
+                    'response_time_ms' => $responseTimeMs,
+                    'error_message' => $errorMessage,
+                    'checked_at' => $checkedAt,
+                ]);
+
+                $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
+
+                $monitor->last_status = $statusCode;
+                $monitor->last_response_time_ms = $responseTimeMs;
+                $monitor->redirect_count = $redirectCount;
+                $monitor->last_checked_at = $checkedAt;
+
+                if ($stability24h !== null) {
+                    $monitor->stability_score = $stability24h;
+                }
+
+                $monitor->save();
+
+                $outageAlertService->maybeSendOutageAlert(
+                    $monitor,
+                    $previousStatus,
+                    $statusCode,
+                    $errorMessage
+                );
+
+                $isUp = ($statusCode >= 200 && $statusCode < 400);
+                $statusMsg = $isUp ? 'OK (' . $statusCode . ')' : 'HIBA (' . $statusCode . ')';
+                $fallbackTag = !empty($result['used_fallback']) ? ' [GET fallback]' : '';
+
+                $this->line(
+                    $monitor->url
+                    . ' -> '
+                    . $statusMsg
+                    . ' (' . $responseTimeMs . 'ms, redirects: ' . $redirectCount . ')'
+                    . $fallbackTag
+                    . ($errorMessage ? ' | ' . $errorMessage : '')
+                );
+            }
+        } finally {
+            $outageAlertService->flushBatch();
+        }
+
+        $this->info('Gyors ellenőrzés kész.');
+        return self::SUCCESS;
+    }
+
+    /**
+     * @return array<string, array{
+     *     status_code:int,
+     *     response_time_ms:int,
+     *     error_message:?string,
+     *     redirect_count:int,
+     *     used_fallback:bool
+     * }>
+     */
+    private function runAttempt(Collection $monitors, array $fallbackStatuses, bool $announceFallback): array
+    {
+        if ($monitors->isEmpty()) {
+            return [];
+        }
+
         $headResults = $this->runPool($monitors, 'HEAD');
 
-        // 2) Csak a valóban indokolt fallbackek menjenek GET-re, szintén párhuzamosan
         $fallbackMonitors = $monitors->filter(function (Monitor $monitor) use ($headResults, $fallbackStatuses) {
             $result = $headResults[(string) $monitor->id] ?? null;
 
@@ -63,20 +169,20 @@ class CheckSitesLight extends Command
 
         $fallbackResults = [];
         if ($fallbackMonitors->isNotEmpty()) {
-            $this->info('GET fallback indul ' . $fallbackMonitors->count() . ' monitorra...');
+            if ($announceFallback) {
+                $this->info('GET fallback indul ' . $fallbackMonitors->count() . ' monitorra...');
+            }
+
             $fallbackResults = $this->runPool($fallbackMonitors, 'GET', [
                 'Range' => 'bytes=0-0',
                 'Accept-Encoding' => 'identity',
             ]);
         }
 
-        $checkedAt = now();
-
+        $results = [];
         foreach ($monitors as $monitor) {
             /** @var Monitor $monitor */
             $monitorId = (string) $monitor->id;
-            $previousStatus = $monitor->last_status;
-
             $result = $headResults[$monitorId] ?? $this->emptyResult();
 
             if (isset($fallbackResults[$monitorId])) {
@@ -86,55 +192,10 @@ class CheckSitesLight extends Command
                 $result['used_fallback'] = false;
             }
 
-            $statusCode = (int) ($result['status_code'] ?? 0);
-            $responseTimeMs = (int) ($result['response_time_ms'] ?? 0);
-            $errorMessage = $result['error_message'] ?? null;
-            $redirectCount = (int) ($result['redirect_count'] ?? 0);
-
-            MonitorLog::create([
-                'monitor_id' => $monitor->id,
-                'status_code' => $statusCode,
-                'response_time_ms' => $responseTimeMs,
-                'error_message' => $errorMessage,
-                'checked_at' => $checkedAt,
-            ]);
-
-            $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
-
-            $monitor->last_status = $statusCode;
-            $monitor->last_response_time_ms = $responseTimeMs;
-            $monitor->redirect_count = $redirectCount;
-            $monitor->last_checked_at = $checkedAt;
-
-            if ($stability24h !== null) {
-                $monitor->stability_score = $stability24h;
-            }
-
-            $monitor->save();
-
-            $outageAlertService->maybeSendOutageAlert(
-                $monitor,
-                $previousStatus,
-                $statusCode,
-                $errorMessage
-            );
-
-            $isUp = ($statusCode >= 200 && $statusCode < 400);
-            $statusMsg = $isUp ? 'OK (' . $statusCode . ')' : 'HIBA (' . $statusCode . ')';
-            $fallbackTag = !empty($result['used_fallback']) ? ' [GET fallback]' : '';
-
-            $this->line(
-                $monitor->url
-                . ' -> '
-                . $statusMsg
-                . ' (' . $responseTimeMs . 'ms, redirects: ' . $redirectCount . ')'
-                . $fallbackTag
-                . ($errorMessage ? ' | ' . $errorMessage : '')
-            );
+            $results[$monitorId] = $result;
         }
 
-        $this->info('Gyors ellenőrzés kész.');
-        return self::SUCCESS;
+        return $results;
     }
 
     private function getMonitorsToCheck(bool $force, int $intervalMinutes, int $batchSize): Collection
@@ -313,6 +374,11 @@ class CheckSitesLight extends Command
         }
 
         return 'Unknown request error.';
+    }
+
+    private function isDownStatus(int $statusCode): bool
+    {
+        return $statusCode <= 0 || $statusCode >= 400;
     }
 
     /**

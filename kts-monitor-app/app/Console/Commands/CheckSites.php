@@ -18,6 +18,9 @@ class CheckSites extends Command
     {
         $defaultInterval = config('app.monitor_interval_minutes');
         $intervalMinutes = (int) Setting::get('monitor_interval_minutes', $defaultInterval);
+        $defaultRetryAttempts = (int) config('app.monitor_retry_attempts', 3);
+        $maxAttempts = (int) Setting::get('monitor_retry_attempts', $defaultRetryAttempts);
+        $maxAttempts = max(1, min($maxAttempts, 10));
 
         $force = (bool) $this->option('force');
 
@@ -35,53 +38,49 @@ class CheckSites extends Command
 
         $monitors = Monitor::where('is_active', true)->get();
         $outageAlertService = app(OutageAlertService::class);
+        $outageAlertService->beginBatch();
 
-        foreach ($monitors as $monitor) {
-            /** @var Monitor $monitor */
-            $previousStatus = $monitor->last_status;
-            $maxAttempts = 3; // max próbálkozás
-            $successCount = 0;
-            $statusCodes = [];
-            $responseTimes = [];
-            $lastErrorMessage = null;
+        try {
+            foreach ($monitors as $monitor) {
+                /** @var Monitor $monitor */
+                $previousStatus = $monitor->last_status;
+                $finalStatus = 0;
+                $finalResponseTime = null;
+                $lastErrorMessage = null;
 
-            $sslDaysRemaining = null;
-            $sslExpiresAt = null;
-            $hasHsts = null;
-            $redirectCount = null;
-            $isWordpress = null;
-            $wordpressVersion = null;
-            $contentLastModifiedAt = null;
+                $sslDaysRemaining = null;
+                $sslExpiresAt = null;
+                $hasHsts = null;
+                $redirectCount = null;
+                $isWordpress = null;
+                $wordpressVersion = null;
+                $contentLastModifiedAt = null;
 
-            for ($i = 0; $i < $maxAttempts; $i++) {
-                $attemptStatus = null;
-                $attemptResponseTime = null;
-                $attemptError = null;
+                for ($i = 0; $i < $maxAttempts; $i++) {
+                    $attemptStatus = null;
+                    $attemptResponseTime = null;
+                    $attemptError = null;
 
-                try {
-                    $start = microtime(true);
-                    $response = Http::timeout(10)->withOptions([
-                        'allow_redirects' => [
-                            'max' => 10,
-                            'track_redirects' => true,
-                        ],
-                    ])->get($monitor->url);
-                    $end = microtime(true);
+                    try {
+                        $start = microtime(true);
+                        $response = Http::timeout(10)->withOptions([
+                            'allow_redirects' => [
+                                'max' => 10,
+                                'track_redirects' => true,
+                            ],
+                        ])->get($monitor->url);
+                        $end = microtime(true);
 
-                    $attemptStatus = $response->status();
-                    $attemptResponseTime = (int) round(($end - $start) * 1000);
+                        $attemptStatus = $response->status();
+                        $attemptResponseTime = (int) round(($end - $start) * 1000);
+                        $finalStatus = $attemptStatus;
+                        $finalResponseTime = $attemptResponseTime;
+                        $lastErrorMessage = null;
 
-                    $statusCodes[] = $attemptStatus;
-                    $responseTimes[] = $attemptResponseTime;
+                        // Siker: bármely 2xx–3xx
+                        $isSuccess = $attemptStatus >= 200 && $attemptStatus < 400;
 
-                    // Siker: bármely 2xx–3xx
-                    $isSuccess = $attemptStatus >= 200 && $attemptStatus < 400;
-
-                    if ($isSuccess) {
-                        $successCount++;
-
-                        // Lassabb metaadatok az első sikeres próbálkozáskor
-                        if ($successCount === 1) {
+                        if ($isSuccess) {
                             // Redirect lánc hossza (Guzzle header)
                             $redirectHistory = $response->header('X-Guzzle-Redirect-History');
                             if ($redirectHistory !== null) {
@@ -113,78 +112,83 @@ class CheckSites extends Command
                                     $contentLastModifiedAt = null;
                                 }
                             }
+
+                            // Ha sikeres (2xx–3xx), nem próbálkozunk tovább
+                            MonitorLog::create([
+                                'monitor_id' => $monitor->id,
+                                'status_code' => $attemptStatus,
+                                'response_time_ms' => $attemptResponseTime,
+                                'error_message' => $attemptError,
+                                'checked_at' => now(),
+                            ]);
+
+                            break;
                         }
 
-                        // Ha sikeres (2xx–3xx), nem próbálkozunk tovább
-                        break;
-                    }
+                        // Ha nem sikeres, de az első próbálkozás, itt is gyűjthetsz metaadatokat, ha akarsz
+                        if ($i === 0) {
+                            $redirectHistory = $response->header('X-Guzzle-Redirect-History');
+                            if ($redirectHistory !== null) {
+                                $redirectUrls = array_filter(explode(', ', $redirectHistory));
+                                $redirectCount = count($redirectUrls);
+                            }
 
-                    // Ha nem sikeres, de az első próbálkozás, itt is gyűjthetsz metaadatokat, ha akarsz
-                    if ($i === 0 && $successCount === 0) {
-                        $redirectHistory = $response->header('X-Guzzle-Redirect-History');
-                        if ($redirectHistory !== null) {
-                            $redirectUrls = array_filter(explode(', ', $redirectHistory));
-                            $redirectCount = count($redirectUrls);
+                            $hasHsts = $response->hasHeader('Strict-Transport-Security');
                         }
-
-                        $hasHsts = $response->hasHeader('Strict-Transport-Security');
+                    } catch (\Exception $e) {
+                        $attemptError = $e->getMessage();
+                        $finalStatus = 0;
+                        $finalResponseTime = null;
+                        $lastErrorMessage = $attemptError;
                     }
-                } catch (\Exception $e) {
-                    $attemptError = $e->getMessage();
-                    $lastErrorMessage = $attemptError;
+
+                    // Logoljuk az egyes próbálkozásokat
+                    MonitorLog::create([
+                        'monitor_id' => $monitor->id,
+                        'status_code' => $attemptStatus,
+                        'response_time_ms' => $attemptResponseTime,
+                        'error_message' => $attemptError,
+                        'checked_at' => now(),
+                    ]);
                 }
 
-                // Logoljuk az egyes próbálkozásokat
-                MonitorLog::create([
-                    'monitor_id' => $monitor->id,
-                    'status_code' => $attemptStatus,
-                    'response_time_ms' => $attemptResponseTime,
-                    'error_message' => $attemptError,
-                    'checked_at' => now(),
+                if (str_starts_with($monitor->url, 'https://')) {
+                    $sslInfo = $this->getSslInfo($monitor->url);
+                    if ($sslInfo !== null) {
+                        $sslDaysRemaining = $sslInfo['days_remaining'];
+                        $sslExpiresAt = $sslInfo['expires_at'];
+                    }
+                }
+
+                $monitor->update([
+                    'last_status' => $finalStatus,
+                    'last_response_time_ms' => $finalResponseTime,
+                    'ssl_days_remaining' => $sslDaysRemaining,
+                    'ssl_expires_at' => $sslExpiresAt,
+                    'has_hsts' => $hasHsts,
+                    'redirect_count' => $redirectCount,
+                    'is_wordpress' => $isWordpress,
+                    'wordpress_version' => $wordpressVersion,
+                    'content_last_modified_at' => $contentLastModifiedAt,
+                    'last_checked_at' => now(),
                 ]);
-            }
 
-            $avgStatus = empty($statusCodes) ? 0 : (int) round(array_sum($statusCodes) / count($statusCodes));
-            $avgResponseTime = empty($responseTimes) ? null : (int) round(array_sum($responseTimes) / count($responseTimes));
+                $outageAlertService->maybeSendOutageAlert(
+                    $monitor,
+                    $previousStatus,
+                    $finalStatus,
+                    $lastErrorMessage
+                );
 
-            // Fontos: a ténylegesen lefutott próbálkozások számát használjuk
-            $effectiveAttempts = max(1, count($statusCodes));
-            $stabilityScore = (int) round(($successCount / $effectiveAttempts) * 100);
-
-            if (str_starts_with($monitor->url, 'https://')) {
-                $sslInfo = $this->getSslInfo($monitor->url);
-                if ($sslInfo !== null) {
-                    $sslDaysRemaining = $sslInfo['days_remaining'];
-                    $sslExpiresAt = $sslInfo['expires_at'];
+                // Recalculate 24h stability from logs (max 96 entries, >5000ms = failure)
+                $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
+                if ($stability24h !== null) {
+                    $monitor->stability_score = $stability24h;
+                    $monitor->save();
                 }
             }
-
-            $monitor->update([
-                'last_status' => $avgStatus,
-                'last_response_time_ms' => $avgResponseTime,
-                'ssl_days_remaining' => $sslDaysRemaining,
-                'ssl_expires_at' => $sslExpiresAt,
-                'has_hsts' => $hasHsts,
-                'redirect_count' => $redirectCount,
-                'is_wordpress' => $isWordpress,
-                'wordpress_version' => $wordpressVersion,
-                'content_last_modified_at' => $contentLastModifiedAt,
-                'last_checked_at' => now(),
-            ]);
-
-            $outageAlertService->maybeSendOutageAlert(
-                $monitor,
-                $previousStatus,
-                $avgStatus,
-                $lastErrorMessage
-            );
-
-            // Recalculate 24h stability from logs (max 96 entries, >5000ms = failure)
-            $stability24h = MonitorLog::calculateStabilityForMonitor($monitor->id);
-            if ($stability24h !== null) {
-                $monitor->stability_score = $stability24h;
-                $monitor->save();
-            }
+        } finally {
+            $outageAlertService->flushBatch();
         }
 
 
