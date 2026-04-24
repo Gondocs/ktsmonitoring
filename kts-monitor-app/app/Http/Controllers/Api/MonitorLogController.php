@@ -16,8 +16,8 @@ class MonitorLogController extends Controller
         // Hard max to avoid accidental huge queries
         if ($limit <= 0) {
             $limit = 50;
-        } elseif ($limit > 1000) {
-            $limit = 1000;
+        } elseif ($limit > 5000) {
+            $limit = 5000;
         }
 
         $logs = MonitorLog::where('monitor_id', $monitorId)

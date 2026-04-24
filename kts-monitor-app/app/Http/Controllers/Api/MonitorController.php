@@ -123,11 +123,12 @@ class MonitorController extends Controller
         $monitor = Monitor::findOrFail($id);
         $previousStatus = $monitor->last_status;
         $lastErrorMessage = null;
+        $finalStatus = 0;
+        $finalResponseTime = null;
 
         $attempts = 3;
+        $attemptsMade = 0;
         $successCount = 0;
-        $statusCodes = [];
-        $responseTimes = [];
 
         $sslDaysRemaining = null;
         $sslExpiresAt = null;
@@ -138,6 +139,7 @@ class MonitorController extends Controller
         $contentLastModifiedAt = null;
 
         for ($i = 0; $i < $attempts; $i++) {
+            $attemptsMade++;
             $attemptStatus = null;
             $attemptResponseTime = null;
             $attemptError = null;
@@ -155,8 +157,9 @@ class MonitorController extends Controller
                 $attemptStatus = $response->status();
                 $attemptResponseTime = (int) round(($end - $start) * 1000);
 
-                $statusCodes[] = $attemptStatus;
-                $responseTimes[] = $attemptResponseTime;
+                $finalStatus = (int) $attemptStatus;
+                $finalResponseTime = $attemptResponseTime;
+                $lastErrorMessage = null;
 
                 if ($attemptStatus >= 200 && $attemptStatus < 400) {
                     $successCount++;
@@ -194,6 +197,8 @@ class MonitorController extends Controller
             } catch (\Exception $e) {
                 $attemptError = $e->getMessage();
                 $lastErrorMessage = $attemptError;
+                $finalStatus = 0;
+                $finalResponseTime = null;
             }
 
             MonitorLog::create([
@@ -209,10 +214,7 @@ class MonitorController extends Controller
             }
         }
 
-        $avgStatus = empty($statusCodes) ? 0 : (int) round(array_sum($statusCodes) / count($statusCodes));
-        $avgResponseTime = empty($responseTimes) ? null : (int) round(array_sum($responseTimes) / count($responseTimes));
-
-        $effectiveAttempts = max(1, count($statusCodes));
+        $effectiveAttempts = max(1, $attemptsMade);
         $stabilityScore = (int) round(($successCount / $effectiveAttempts) * 100);
 
         if (str_starts_with($monitor->url, 'https://')) {
@@ -225,8 +227,8 @@ class MonitorController extends Controller
         }
 
         $monitor->update([
-            'last_status' => $avgStatus,
-            'last_response_time_ms' => $avgResponseTime,
+            'last_status' => $finalStatus,
+            'last_response_time_ms' => $finalResponseTime,
             'ssl_days_remaining' => $sslDaysRemaining,
             'ssl_expires_at' => $sslExpiresAt,
             'has_hsts' => $hasHsts,
@@ -241,7 +243,7 @@ class MonitorController extends Controller
         app(OutageAlertService::class)->maybeSendOutageAlert(
             $monitor,
             $previousStatus,
-            $avgStatus,
+            $finalStatus,
             $lastErrorMessage
         );
 

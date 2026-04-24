@@ -130,6 +130,8 @@ const heatmapRangeOptions: { value: HeatmapRange; label: string }[] = [
   { value: "14d", label: "14 nap" },
 ];
 
+const DETAIL_LOG_FETCH_LIMIT = 2000;
+
 const safeHost = (url: string) => {
   try {
     return new URL(url).hostname;
@@ -379,7 +381,10 @@ export const MonitorPage: React.FC = () => {
   const refreshSelectedMonitorLogs = useCallback(async () => {
     if (selectedMonitorId == null) return;
     try {
-      const data = await fetchSiteLogs(selectedMonitorId, 400);
+      const data = await fetchSiteLogs(
+        selectedMonitorId,
+        DETAIL_LOG_FETCH_LIMIT,
+      );
       setSelectedMonitorLogs(data);
     } catch {
       // keep current chart data if refresh fails
@@ -481,7 +486,10 @@ export const MonitorPage: React.FC = () => {
 
       setSelectedMonitorLogsLoading(true);
       try {
-        const data = await fetchSiteLogs(selectedMonitorId, 400);
+        const data = await fetchSiteLogs(
+          selectedMonitorId,
+          DETAIL_LOG_FETCH_LIMIT,
+        );
         if (!cancelled) {
           setSelectedMonitorLogs(data);
         }
