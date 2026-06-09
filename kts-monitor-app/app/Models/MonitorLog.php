@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Carbon;
 
 class MonitorLog extends Model
 {
@@ -22,8 +21,7 @@ class MonitorLog extends Model
     }
 
     /**
-     * Calculate stability score for a monitor over the last 24h
-     * (max 96 samples assuming 15-minute checks).
+     * Calculate stability score for a monitor over the last 24h.
      *
      * Rules:
      * - success = HTTP 2xx-3xx AND response_time_ms <= 5000
@@ -37,7 +35,6 @@ class MonitorLog extends Model
         $logs = static::where('monitor_id', $monitorId)
             ->where('checked_at', '>=', $since)
             ->orderBy('checked_at', 'desc')
-            ->limit(96)
             ->get();
 
         $total = $logs->count();

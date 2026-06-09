@@ -22,7 +22,7 @@ class CheckSitesLight extends Command
 
     private const USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
     private const CONNECT_TIMEOUT_SECONDS = 10.0;
-    private const REQUEST_TIMEOUT_SECONDS = 30.0;
+    private const REQUEST_TIMEOUT_SECONDS = 60.0;
     private const MAX_REDIRECTS = 5;
     private const DEFAULT_GET_FALLBACK_STATUSES = [416];
 
@@ -125,11 +125,11 @@ class CheckSitesLight extends Command
 
                 $this->line(
                     $monitor->url
-                    . ' -> '
-                    . $statusMsg
-                    . ' (' . $responseTimeMs . 'ms, redirects: ' . $redirectCount . ')'
-                    . $fallbackTag
-                    . ($errorMessage ? ' | ' . $errorMessage : '')
+                        . ' -> '
+                        . $statusMsg
+                        . ' (' . $responseTimeMs . 'ms, redirects: ' . $redirectCount . ')'
+                        . $fallbackTag
+                        . ($errorMessage ? ' | ' . $errorMessage : '')
                 );
             }
         } finally {
