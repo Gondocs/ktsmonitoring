@@ -265,7 +265,188 @@ export const MonitorListSection: React.FC<Props> = ({
       </div>
 
       {/* Mobile cards */}
-      {/* ...lifted 1:1 from your original mobile grid, but using the same props/handlers... */}
+      <div className="block md:hidden space-y-3">
+        {activeSites.length === 0 ? (
+          <div className="text-center text-slate-500 py-10 text-sm">
+            Nincs megjeleníthető aktív monitor.
+          </div>
+        ) : (
+          activeSites.map((m) => {
+            const rowRefreshing =
+              isRowRefreshing(m.id) ||
+              isRowRefreshingLight(m.id) ||
+              refreshing ||
+              refreshingLight;
+
+            return (
+              <div
+                key={m.id}
+                className={`rounded-xl border border-slate-800 bg-slate-950 shadow-lg overflow-hidden transition-opacity duration-200 ${
+                  rowRefreshing ? "opacity-40 pointer-events-none" : ""
+                }`}
+              >
+                {/* Header: name + URL + status */}
+                <div className="flex items-start justify-between px-4 pt-4 pb-3 gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-100 truncate">
+                      {m.name || "Névtelen"}
+                    </p>
+                    <a
+                      href={m.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-slate-500 hover:text-ktsRed transition truncate block max-w-[220px]"
+                    >
+                      {m.url}
+                    </a>
+                  </div>
+                  <span
+                    className="shrink-0 inline-flex items-center text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border"
+                    style={{
+                      color: statusColor(m),
+                      backgroundColor: `${statusColor(m)}15`,
+                      borderColor: `${statusColor(m)}30`,
+                    }}
+                  >
+                    {m.last_status ?? "—"}
+                  </span>
+                </div>
+
+                {/* Metrics row */}
+                <div className="grid grid-cols-3 divide-x divide-slate-800 border-t border-slate-800 text-center text-[11px]">
+                  <div className="px-2 py-3">
+                    <p className="text-slate-500 mb-1">Válaszidő</p>
+                    <p className="font-mono text-slate-300">
+                      {m.last_response_time_ms
+                        ? `${m.last_response_time_ms} ms`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="px-2 py-3">
+                    <p className="text-slate-500 mb-1">SSL</p>
+                    <p
+                      className="font-mono"
+                      style={{ color: sslColor(m.ssl_days_remaining) }}
+                    >
+                      {m.ssl_days_remaining != null
+                        ? `${m.ssl_days_remaining} nap`
+                        : "—"}
+                    </p>
+                    {m.has_hsts ? (
+                      <span className="inline-block mt-1 text-[9px] uppercase tracking-wider text-emerald-400 bg-emerald-950/40 border border-emerald-900/50 px-1.5 py-0.5 rounded">
+                        HSTS
+                      </span>
+                    ) : (
+                      <span className="inline-block mt-1 text-[9px] uppercase tracking-wider text-yellow-400 bg-yellow-950/40 border border-yellow-900/20 px-1.5 py-0.5 rounded opacity-70">
+                        HSTS
+                      </span>
+                    )}
+                  </div>
+                  <div className="px-2 py-3">
+                    <p className="text-slate-500 mb-1">Stabilitás</p>
+                    {m.stability_score != null ? (
+                      <>
+                        <p className="font-mono text-slate-300 mb-1">
+                          {m.stability_score}%
+                        </p>
+                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mx-auto max-w-[48px]">
+                          <div
+                            className={`h-full rounded-full ${
+                              m.stability_score >= 95
+                                ? "bg-green-500"
+                                : m.stability_score >= 85
+                                ? "bg-yellow-500"
+                                : "bg-red-500"
+                            }`}
+                            style={{ width: `${m.stability_score}%` }}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-slate-500">—</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer: last checked + actions */}
+                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/30">
+                  <div className="text-[11px] text-slate-500">
+                    {m.last_checked_at ? (
+                      <>
+                        {(() => {
+                          const d = new Date(m.last_checked_at);
+                          d.setHours(d.getHours() + 1);
+                          return (
+                            <>
+                              <span>
+                                {d.toLocaleDateString("hu-HU")}{" "}
+                                {d.toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </>
+                          );
+                        })()}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                    {m.is_wordpress && (
+                      <span className="ml-2 text-slate-600">
+                        WP {m.wordpress_version || ""}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center rounded-lg border border-slate-700 bg-slate-900 overflow-hidden shadow-sm">
+                      <button
+                        onClick={() => onRefreshOneLight(m.id)}
+                        disabled={rowRefreshing}
+                        className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition disabled:opacity-50"
+                        title="Gyors ellenőrzés"
+                      >
+                        <FiZap className="h-4 w-4" />
+                      </button>
+                      <div className="w-px h-4 bg-slate-800" />
+                      <button
+                        onClick={() => onRefreshOne(m.id)}
+                        disabled={rowRefreshing}
+                        className="p-2 text-slate-400 hover:text-ktsRed hover:bg-slate-800 transition disabled:opacity-50"
+                        title="Teljes ellenőrzés"
+                      >
+                        <FiRefreshCw className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => onOpenLogs(m)}
+                      className="p-2 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded transition"
+                      title="Naplók"
+                    >
+                      <FiFileText className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => onStartEdit(m)}
+                      className="p-2 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded transition"
+                      title="Szerkesztés"
+                    >
+                      <FiEdit2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => onDelete(m.id)}
+                      className="p-2 text-slate-500 hover:text-red-500 hover:bg-slate-800 rounded transition"
+                      title="Törlés"
+                    >
+                      <FiTrash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
 
       {/* Inactive sites */}
       {inactiveSites.length > 0 && (
