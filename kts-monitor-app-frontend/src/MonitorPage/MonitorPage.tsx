@@ -1409,7 +1409,174 @@ export const MonitorPage: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    <div className="overflow-auto">
+                    <>
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {sortedSites.length === 0 ? (
+                        <div className="px-4 py-10 text-center text-slate-500">
+                          Nincs megjeleníthető monitor a kiválasztott szűrőben.
+                        </div>
+                      ) : (
+                        sortedSites.map((m) => {
+                          const rowRefreshing =
+                            isRowRefreshing(m.id) ||
+                            isRowRefreshingLight(m.id) ||
+                            refreshing ||
+                            refreshingLight;
+                          const selected = selectedMonitor?.id === m.id;
+                          return (
+                            <div
+                              key={m.id}
+                              className={`p-4 transition cursor-pointer ${selected ? "bg-[#073a59]/5 border-l-4 border-[#073a59]" : "border-l-4 border-transparent hover:bg-slate-50"} ${rowRefreshing ? "opacity-60" : ""}`}
+                              onClick={() => setSelectedMonitorId(m.id)}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                                      style={{ backgroundColor: getStatusColor(m) }}
+                                    />
+                                    <p className="font-semibold text-slate-900 truncate">
+                                      {m.name || safeHost(m.url)}
+                                    </p>
+                                  </div>
+                                  <a
+                                    href={m.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="mt-0.5 inline-flex items-center gap-1 text-xs"
+                                    style={{ color: BRAND_BLUE }}
+                                  >
+                                    {safeHost(m.url)}
+                                    <FiExternalLink className="h-3 w-3" />
+                                  </a>
+                                </div>
+                                <span
+                                  className="flex-shrink-0 inline-flex items-center rounded-full px-2 py-1 text-xs font-bold"
+                                  style={{
+                                    color: getStatusColor(m),
+                                    backgroundColor: `${getStatusColor(m)}18`,
+                                  }}
+                                >
+                                  {m.last_status ?? "HIBA"}
+                                </span>
+                              </div>
+
+                              <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                                <div>
+                                  <p className="text-slate-500">Válaszidő</p>
+                                  <p className="font-mono font-semibold text-slate-700">
+                                    {m.last_response_time_ms != null
+                                      ? `${m.last_response_time_ms} ms`
+                                      : "-"}
+                                  </p>
+                                  {(m.redirect_count ?? 0) > 0 && (
+                                    <p className="text-[10px] text-amber-600">
+                                      ↪ {m.redirect_count}×
+                                    </p>
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">SSL</p>
+                                  <p
+                                    className="font-semibold"
+                                    style={{ color: getSslColor(m.ssl_days_remaining) }}
+                                  >
+                                    {m.ssl_days_remaining != null
+                                      ? `${m.ssl_days_remaining} nap`
+                                      : "-"}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">Stabilitás</p>
+                                  {m.stability_score != null ? (
+                                    <>
+                                      <p className="font-semibold text-slate-700">
+                                        {m.stability_score}%
+                                      </p>
+                                      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-slate-200">
+                                        <div
+                                          className={`h-full rounded-full ${
+                                            m.stability_score >= 95
+                                              ? "bg-emerald-500"
+                                              : m.stability_score >= 85
+                                                ? "bg-amber-500"
+                                                : "bg-[#af272f]"
+                                          }`}
+                                          style={{ width: `${m.stability_score}%` }}
+                                        />
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <p className="text-slate-400">-</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="mt-3 flex items-center justify-between">
+                                <p className="text-[10px] text-slate-400">
+                                  {formatRelativeTimeHu(m.last_checked_at)}
+                                </p>
+                                <div
+                                  className="flex items-center gap-1.5"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRefreshOneLight(m.id)}
+                                    disabled={rowRefreshing}
+                                    className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                                    title="Gyors ellenőrzés"
+                                  >
+                                    <FiZap className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRefreshOne(m.id)}
+                                    disabled={rowRefreshing}
+                                    className="rounded-lg p-1.5 text-white disabled:opacity-50"
+                                    title="Teljes ellenőrzés"
+                                    style={{ backgroundColor: BRAND_BLUE }}
+                                  >
+                                    <FiRefreshCw className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => openLogsModal(m)}
+                                    className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100"
+                                    title="Naplók"
+                                  >
+                                    <FiFileText className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditMonitor(m)}
+                                    className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100"
+                                    title="Szerkesztés"
+                                  >
+                                    <FiEdit2 className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(m.id)}
+                                    className="rounded-lg border p-1.5 hover:bg-red-50"
+                                    title="Törlés"
+                                    style={{
+                                      borderColor: `${BRAND_RED}55`,
+                                      color: BRAND_RED,
+                                    }}
+                                  >
+                                    <FiTrash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    <div className="overflow-auto hidden sm:block">
                       <table className="min-w-full text-left text-sm">
                         <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
                           <tr>
@@ -1591,6 +1758,7 @@ export const MonitorPage: React.FC = () => {
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
                 </div>
 
