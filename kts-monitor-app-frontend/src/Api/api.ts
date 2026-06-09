@@ -120,7 +120,7 @@ export async function checkOneSiteLight(id: number) {
 	});
 }
 
-export async function fetchSiteLogs(id: number, limit = 50) {
+export async function fetchSiteLogs(id: number, limit = 500) {
 	return apiFetch(`/sites/${id}/logs?limit=${limit}`);
 }
 
