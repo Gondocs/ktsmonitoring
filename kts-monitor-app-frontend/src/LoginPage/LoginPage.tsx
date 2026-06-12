@@ -9,8 +9,8 @@ type Props = {
 
 export const LoginPage: React.FC<Props> = ({ onLoggedIn }) => {
   const { login } = useAuth();
-  const [email, setEmail] = useState("test@example.com");
-  const [password, setPassword] = useState("password");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -30,7 +30,6 @@ export const LoginPage: React.FC<Props> = ({ onLoggedIn }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 relative overflow-hidden px-4">
-      
       {/* Aurora Background */}
       <div className="absolute inset-0 z-0">
         <Aurora
