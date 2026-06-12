@@ -32,7 +32,7 @@ class OutageDetectedMail extends Mailable
                 'monitor' => $this->monitor,
                 'statusCode' => $this->statusCode,
                 'errorMessage' => $this->errorMessage,
-                'checkedAt' => now()->format('Y.m.d. H:i:s'),
+                'checkedAt' => now()->timezone('Europe/Budapest')->format('Y.m.d. H:i:s'),
             ]);
     }
 }

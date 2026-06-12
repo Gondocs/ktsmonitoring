@@ -14,7 +14,7 @@ class MonitorController extends Controller
 {
     private const LIGHT_USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
     private const LIGHT_CONNECT_TIMEOUT_SECONDS = 3.0;
-    private const LIGHT_REQUEST_TIMEOUT_SECONDS = 15.0;
+    private const LIGHT_REQUEST_TIMEOUT_SECONDS = 30.0;
     private const LIGHT_DEFAULT_GET_FALLBACK_STATUSES = [416];
 
     // GET /api/sites

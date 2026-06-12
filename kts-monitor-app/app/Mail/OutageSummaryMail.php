@@ -34,7 +34,7 @@ class OutageSummaryMail extends Mailable
             ->with([
                 'outages' => $this->outages,
                 'count' => $count,
-                'generatedAt' => now()->format('Y.m.d. H:i:s'),
+                'generatedAt' => now()->timezone('Europe/Budapest')->format('Y.m.d. H:i:s'),
             ]);
     }
 }
