@@ -21,8 +21,8 @@ class CheckSitesLight extends Command
     protected $description = 'Gyors rendelkezésre állás ellenőrzés (parallel GET range + optional full GET fallback)';
 
     private const USER_AGENT = 'MyMonitorBot/1.0 (Light Check)';
-    private const CONNECT_TIMEOUT_SECONDS = 10.0;
-    private const REQUEST_TIMEOUT_SECONDS = 15.0;
+    private const CONNECT_TIMEOUT_SECONDS = 15.0;
+    private const REQUEST_TIMEOUT_SECONDS = 30.0;
     private const MAX_REDIRECTS = 5;
     private const DEFAULT_GET_FALLBACK_STATUSES = [416];
 
